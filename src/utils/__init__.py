@@ -1,1 +1,1 @@
-"""Utility helpers for Ko-RL-QR."""
+"""Utility helpers for KorQR-RL."""

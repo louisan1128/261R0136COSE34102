@@ -36,8 +36,9 @@ def main():
     }
 
     for idx, qa in enumerate(qa_pairs, start=1):
-        bm25_results = bm25.retrieve(qa["question"], top_k=top_k)
-        dense_results = dense.retrieve(qa["question"], top_k=top_k)
+        candidate_k = max(top_k * 5, 50)
+        bm25_results = bm25.retrieve(qa["question"], top_k=candidate_k)
+        dense_results = dense.retrieve(qa["question"], top_k=candidate_k)
         for alpha in alpha_values:
             retrieved = _rank_hybrid_from_results(bm25_results, dense_results, alpha, top_k)
             gold_doc_id = qa["gold_doc_id"]

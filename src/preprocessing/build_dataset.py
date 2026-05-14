@@ -133,7 +133,7 @@ def _extract_answer_text(answers: Any) -> str:
 
 
 def _build_dummy_dataset(corpus_out: Path, qa_out: Path) -> None:
-    # TODO: Replace this with a real KorQuAD/KLUE-MRC file for final experiments.
+    # Small fallback data for smoke tests when the real KorQuAD/KLUE file is absent.
     corpus = [
         {"doc_id": "doc_000001", "text": "세종대왕은 조선의 네 번째 왕이며 훈민정음을 창제했다."},
         {"doc_id": "doc_000002", "text": "훈민정음은 백성을 가르치는 바른 소리라는 뜻을 가진 문자 체계이다."},
@@ -171,7 +171,7 @@ def _build_dummy_dataset(corpus_out: Path, qa_out: Path) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build processed dataset for Ko-RL-QR.")
+    parser = argparse.ArgumentParser(description="Build processed dataset for KorQR-RL.")
     parser.add_argument("--raw_path", default="data/raw/KorQuAD.json")
     parser.add_argument("--corpus_out", default="data/processed/corpus.jsonl")
     parser.add_argument("--qa_out", default="data/processed/qa_pairs.jsonl")

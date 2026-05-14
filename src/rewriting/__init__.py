@@ -1,1 +1,1 @@
-"""Query rewriting utilities for Ko-RL-QR."""
+"""Query rewriting utilities for KorQR-RL."""

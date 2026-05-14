@@ -1,1 +1,1 @@
-"""Preprocessing utilities for Ko-RL-QR."""
+"""Preprocessing utilities for KorQR-RL."""

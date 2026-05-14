@@ -24,8 +24,9 @@ class HybridRetriever(BaseRetriever):
         return [(score - min_score) / (max_score - min_score) for score in scores]
 
     def retrieve(self, query: str, top_k: int = 10) -> list[dict]:
-        bm25_results = self.bm25.retrieve(query, top_k=top_k)
-        dense_results = self.dense.retrieve(query, top_k=top_k)
+        candidate_k = max(top_k * 5, 50)
+        bm25_results = self.bm25.retrieve(query, top_k=candidate_k)
+        dense_results = self.dense.retrieve(query, top_k=candidate_k)
 
         merged: Dict[str, Dict[str, float]] = {}
         for item in bm25_results:

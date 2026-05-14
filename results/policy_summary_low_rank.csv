@@ -1,9 +1,0 @@
-﻿subset,retriever,policy_name,recall@1,recall@5,recall@10,mrr,avg_reward,num_records
-original_rank_gt_5,hybrid,always_expanded,0.0,0.0,1.0,0.1111111111111111,1.0430555555555556,1
-original_rank_gt_5,hybrid,always_keyword,0.0,0.0,1.0,0.14285714285714285,1.1666666666666667,1
-original_rank_gt_5,hybrid,always_prompt,0.0,0.0,1.0,0.14285714285714285,1.1666666666666667,1
-original_rank_gt_5,hybrid,always_structured,0.0,0.0,1.0,0.14285714285714285,1.1666666666666667,1
-original_rank_gt_5,hybrid,contextual_bandit,0.0,0.0,1.0,0.1,1.0,1
-original_rank_gt_5,hybrid,epsilon_greedy_bandit,0.0,0.0,1.0,0.1111111111111111,1.0430555555555556,1
-original_rank_gt_5,hybrid,oracle_best_strategy,0.0,0.0,1.0,0.14285714285714285,1.1666666666666667,1
-original_rank_gt_5,hybrid,original_only,0.0,0.0,1.0,0.1,1.0,1

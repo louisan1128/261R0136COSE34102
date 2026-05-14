@@ -1,4 +1,4 @@
-"""Retriever implementations for Ko-RL-QR."""
+"""Retriever implementations for KorQR-RL."""
 
 from .bm25 import BM25Retriever
 from .dense import DenseRetriever

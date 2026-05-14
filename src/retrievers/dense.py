@@ -36,13 +36,13 @@ class DenseRetriever(BaseRetriever):
         self.doc_texts = [item["text"] for item in self.corpus]
         self.index = None
         self.model = None
+        self._query_embedding_cache = {}
 
+        self._initialize_backend()
         cache_key = self._cache_key()
         self.index_path = self.embedding_dir / f"{cache_key}.faiss.index"
         self.embedding_path = self.embedding_dir / f"{cache_key}.doc_embeddings.npy"
         self.doc_ids_path = self.embedding_dir / f"{cache_key}.doc_ids.npy"
-
-        self._initialize_backend()
         self._build_or_load_index()
 
     def _initialize_backend(self) -> None:
@@ -176,9 +176,7 @@ class DenseRetriever(BaseRetriever):
                 for idx in ranked_indices
             ]
 
-        query_text = self._prepare_query(query)
-        query_embedding = self.model.encode([query_text], convert_to_numpy=True)
-        query_embedding = self._normalize_embeddings(query_embedding.astype(np.float32))
+        query_embedding = self._encode_query(query)
 
         scores, indices = self.index.search(query_embedding, top_k)
         results = []
@@ -193,3 +191,15 @@ class DenseRetriever(BaseRetriever):
                 }
             )
         return results
+
+    def _encode_query(self, query: str) -> np.ndarray:
+        cached = self._query_embedding_cache.get(query)
+        if cached is not None:
+            return cached
+
+        query_text = self._prepare_query(query)
+        query_embedding = self.model.encode([query_text], convert_to_numpy=True)
+        query_embedding = self._normalize_embeddings(query_embedding.astype(np.float32))
+        if len(self._query_embedding_cache) < 50000:
+            self._query_embedding_cache[query] = query_embedding
+        return query_embedding

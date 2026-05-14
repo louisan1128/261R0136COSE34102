@@ -1,1 +1,1 @@
-"""Evaluation utilities for Ko-RL-QR."""
+"""Evaluation utilities for KorQR-RL."""

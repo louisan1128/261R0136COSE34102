@@ -1,18 +1,40 @@
 top_k: 10
+project_name: KorQR-RL
+project_title: "Offline Reinforcement Learning for Korean Query Rewriting in RAG"
 
-# Use "lexical" for offline smoke tests.
-# Use "sentence_transformers" or "auto" for real dense retrieval experiments.
+# Use "sentence_transformers" for final experiments.
+# Use "lexical" only for fast offline smoke tests.
 model_name: intfloat/multilingual-e5-base
-dense_backend: lexical  # lexical | sentence_transformers | auto
+dense_backend: sentence_transformers  # lexical | sentence_transformers | auto
 
 reward:
   alpha: 1.0
   beta: 0.5
-  lambda: 0.05
+  answer_gamma: 0.5
+  lambda: 0.02
+  drift_gamma: 0.2
 
 hybrid:
   alpha: 0.5  # BM25 weight. Dense weight is 1 - alpha.
   alpha_values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+offline_rl:
+  train_ratio: 0.7
+  seed: 7
+  gamma: 0.0  # One-step query rewriting MDP: no future reward term.
+
+llm_rewrite:
+  enabled: false
+  provider: openai_compatible
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY
+  model_env: OPENAI_MODEL
+  model: ""
+  temperature: 0.2
+  max_tokens: 96
+  timeout_seconds: 30
+  allow_fallback: true
+  cache_path: data/outputs/llm_rewrite_cache.jsonl
 
 data:
   raw_path: data/raw/KorQuAD_v1.0_dev.json
@@ -31,4 +53,7 @@ data:
   reward_ablation_path: data/outputs/reward_ablation_results.csv
   sentence_dense_results_path: data/outputs/sentence_dense_original_results.csv
   hybrid_alpha_sweep_path: data/outputs/hybrid_alpha_sweep.csv
+  policy_results_path: data/outputs/policy_results.csv
+  policy_summary_path: data/outputs/policy_summary.csv
+  policy_summary_hard_cases_path: data/outputs/policy_summary_hard_cases.csv
   embedding_dir: embeddings

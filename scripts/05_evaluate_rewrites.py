@@ -23,7 +23,9 @@ def main():
     reward_calculator = RewardCalculator(
         alpha=config["reward"]["alpha"],
         beta=config["reward"]["beta"],
+        answer_gamma=config["reward"].get("answer_gamma", 0.5),
         lambda_=config["reward"]["lambda"],
+        drift_gamma=config["reward"].get("drift_gamma", 0.2),
     )
 
     rewrite_results = evaluate_rewrites(

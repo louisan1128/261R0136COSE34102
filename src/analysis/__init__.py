@@ -1,1 +1,1 @@
-"""Analysis utilities for Ko-RL-QR."""
+"""Analysis utilities for KorQR-RL."""

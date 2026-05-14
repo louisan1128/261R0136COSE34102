@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.evaluation.metrics import mrr, recall_at_k
+from src.evaluation.metrics import answer_f1, mrr, recall_at_k
+from src.rewriting.policy import infer_failure_type
 from src.utils.io import ensure_dir, read_jsonl, write_jsonl
 
 
@@ -11,7 +12,7 @@ def load_qa_pairs(path: str) -> list[dict[str, Any]]:
 
 
 def evaluate_retriever(retriever, qa_pairs: list[dict[str, Any]], top_k: int = 10) -> dict[str, float]:
-    counts = {"recall@1": 0.0, "recall@5": 0.0, "recall@10": 0.0, "mrr": 0.0}
+    counts = {"recall@1": 0.0, "recall@5": 0.0, "recall@10": 0.0, "mrr": 0.0, "answer_f1": 0.0}
     for qa in qa_pairs:
         gold_doc_id = qa["gold_doc_id"]
         retrieved = retriever.retrieve(qa["question"], top_k=top_k)
@@ -19,6 +20,7 @@ def evaluate_retriever(retriever, qa_pairs: list[dict[str, Any]], top_k: int = 1
         counts["recall@5"] += recall_at_k(retrieved, gold_doc_id, 5)
         counts["recall@10"] += recall_at_k(retrieved, gold_doc_id, 10)
         counts["mrr"] += mrr(retrieved, gold_doc_id)
+        counts["answer_f1"] += answer_f1(retrieved, qa.get("answer", ""), k=top_k)
 
     total = len(qa_pairs) or 1
     return {
@@ -26,6 +28,7 @@ def evaluate_retriever(retriever, qa_pairs: list[dict[str, Any]], top_k: int = 1
         "recall@5": counts["recall@5"] / total,
         "recall@10": counts["recall@10"] / total,
         "mrr": counts["mrr"] / total,
+        "answer_f1": counts["answer_f1"] / total,
         "num_questions": total,
     }
 
@@ -49,6 +52,7 @@ def save_hard_cases(retriever, qa_pairs: list[dict[str, Any]], out_path: str, to
             retrieved = retriever.retrieve(qa["question"], top_k=top_k)
             retrieved_ids = [item["doc_id"] for item in retrieved]
             if qa["gold_doc_id"] not in retrieved_ids:
+                failure_type = infer_failure_type(qa["question"])
                 hard_case = {
                     "qid": qa["qid"],
                     "question": qa["question"],
@@ -56,7 +60,7 @@ def save_hard_cases(retriever, qa_pairs: list[dict[str, Any]], out_path: str, to
                     "gold_doc_id": qa["gold_doc_id"],
                     "gold_passage": qa.get("gold_passage", ""),
                     "original_retrieved_top10": retrieved_ids,
-                    "failure_type": "unlabeled",
+                    "failure_type": failure_type,
                     "failed_retrievers": ["bm25"],
                     "original_retrieved_by_retriever": {"bm25": retrieved_ids},
                 }
@@ -90,6 +94,7 @@ def save_hard_cases_by_retriever(
             continue
 
         primary = failed_retrievers[0]
+        failure_type = infer_failure_type(qa["question"])
         hard_cases_by_qid[qa["qid"]] = {
             "qid": qa["qid"],
             "question": qa["question"],
@@ -99,7 +104,7 @@ def save_hard_cases_by_retriever(
             "original_retrieved_top10": retrieved_by_retriever[primary],
             "original_retrieved_by_retriever": retrieved_by_retriever,
             "failed_retrievers": failed_retrievers,
-            "failure_type": "unlabeled",
+            "failure_type": failure_type,
         }
 
     hard_cases = list(hard_cases_by_qid.values())
