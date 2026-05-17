@@ -9,6 +9,14 @@ from src.utils.text import tokenize
 
 STRATEGIES = ["original", "keyword", "expanded", "prompt", "structured", "llm"]
 
+FINAL_POLICY_LABELS = {
+    "original_only": "original_query",
+    "failure_type_policy": "rule_based_rewrite",
+    "always_llm": "llm_rewrite",
+    "reward_selected": "reward_selected_rewrite",
+    "offline_q_learning": "rl_selected_rewrite",
+}
+
 
 def evaluate_rewrite_policies(
     rewrite_results: list[dict],
@@ -20,7 +28,7 @@ def evaluate_rewrite_policies(
     records_by_key = _index_rewrite_results(rewrite_results)
     hard_case_by_qid = {record["qid"]: record for record in hard_cases}
     qid_order = _stable_qid_order(rewrite_results)
-    train_qids, test_qids = _split_qids(qid_order, train_ratio)
+    train_qids, test_qids = _split_qids(qid_order, train_ratio, seed)
 
     policy_rows = []
     policy_rows.extend(_evaluate_static_policies(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
@@ -61,12 +69,14 @@ def _stable_qid_order(rewrite_results: list[dict]) -> list[str]:
     return qids
 
 
-def _split_qids(qid_order: list[str], train_ratio: float) -> tuple[set[str], set[str]]:
+def _split_qids(qid_order: list[str], train_ratio: float, seed: int) -> tuple[set[str], set[str]]:
     if not qid_order:
         return set(), set()
     train_ratio = min(max(train_ratio, 0.1), 0.9)
-    split_idx = max(1, min(len(qid_order) - 1, int(len(qid_order) * train_ratio)))
-    return set(qid_order[:split_idx]), set(qid_order[split_idx:])
+    shuffled_qids = list(qid_order)
+    random.Random(seed).shuffle(shuffled_qids)
+    split_idx = max(1, min(len(shuffled_qids) - 1, int(len(shuffled_qids) * train_ratio)))
+    return set(shuffled_qids[:split_idx]), set(shuffled_qids[split_idx:])
 
 
 def _evaluate_static_policies(
@@ -84,6 +94,7 @@ def _evaluate_static_policies(
         "always_structured": lambda candidates, hard_case: "structured",
         "always_llm": lambda candidates, hard_case: "llm",
         "failure_type_policy": _select_failure_type_policy,
+        "reward_selected": _select_reward_selected,
         "oracle_best_strategy": _select_oracle,
     }
 
@@ -148,8 +159,10 @@ def _evaluate_epsilon_greedy(
     rng = random.Random(seed)
     values = defaultdict(lambda: defaultdict(float))
     counts = defaultdict(lambda: defaultdict(int))
-    rows = []
 
+    _fit_strategy_values(records_by_key, train_qids, values, counts)
+
+    rows = []
     for qid in qid_order:
         hard_case = hard_case_by_qid.get(qid, {})
         for retriever in _retrievers_for_qid(records_by_key, qid):
@@ -168,9 +181,6 @@ def _evaluate_epsilon_greedy(
                 eval_split=_eval_split(qid, train_qids, test_qids),
             )
             rows.append(row)
-            counts[retriever][strategy] += 1
-            step = counts[retriever][strategy]
-            values[retriever][strategy] += (row["reward"] - values[retriever][strategy]) / step
 
     return rows
 
@@ -186,8 +196,10 @@ def _evaluate_ucb_bandit(
     values = defaultdict(lambda: defaultdict(float))
     counts = defaultdict(lambda: defaultdict(int))
     total_counts = defaultdict(int)
-    rows = []
 
+    _fit_strategy_values(records_by_key, train_qids, values, counts, total_counts)
+
+    rows = []
     for qid in qid_order:
         hard_case = hard_case_by_qid.get(qid, {})
         for retriever in _retrievers_for_qid(records_by_key, qid):
@@ -213,10 +225,6 @@ def _evaluate_ucb_bandit(
                 eval_split=_eval_split(qid, train_qids, test_qids),
             )
             rows.append(row)
-            counts[retriever][strategy] += 1
-            total_counts[retriever] += 1
-            step = counts[retriever][strategy]
-            values[retriever][strategy] += (row["reward"] - values[retriever][strategy]) / step
     return rows
 
 
@@ -231,8 +239,18 @@ def _evaluate_thompson_sampling(
     rng = random.Random(seed)
     successes = defaultdict(lambda: defaultdict(float))
     failures = defaultdict(lambda: defaultdict(float))
-    rows = []
 
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            for strategy, record in candidates.items():
+                if _policy_reward(record) > 0:
+                    successes[retriever][strategy] += 1.0
+                else:
+                    failures[retriever][strategy] += 1.0
+
+    rows = []
     for qid in qid_order:
         hard_case = hard_case_by_qid.get(qid, {})
         for retriever in _retrievers_for_qid(records_by_key, qid):
@@ -255,10 +273,6 @@ def _evaluate_thompson_sampling(
                 eval_split=_eval_split(qid, train_qids, test_qids),
             )
             rows.append(row)
-            if row["recall@10"] > 0:
-                successes[retriever][strategy] += 1.0
-            else:
-                failures[retriever][strategy] += 1.0
     return rows
 
 
@@ -273,18 +287,34 @@ def _evaluate_contextual_bandit(
     counts = defaultdict(lambda: defaultdict(int))
     global_values = defaultdict(lambda: defaultdict(float))
     global_counts = defaultdict(lambda: defaultdict(int))
-    rows = []
 
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            context = _state_key(hard_case, retriever)
+            context_key = (retriever, context)
+            for strategy, record in candidates.items():
+                reward = _policy_reward(record)
+                counts[context_key][strategy] += 1
+                context_step = counts[context_key][strategy]
+                values[context_key][strategy] += (reward - values[context_key][strategy]) / context_step
+
+                global_counts[retriever][strategy] += 1
+                global_step = global_counts[retriever][strategy]
+                global_values[retriever][strategy] += (reward - global_values[retriever][strategy]) / global_step
+
+    rows = []
     for qid in qid_order:
         hard_case = hard_case_by_qid.get(qid, {})
-        context = hard_case.get("failure_type", "unlabeled")
         for retriever in _retrievers_for_qid(records_by_key, qid):
             candidates = records_by_key[(qid, retriever)]
             available = [strategy for strategy in STRATEGIES if strategy in candidates]
-            recommended = [strategy for strategy in select_strategies(context) if strategy in candidates]
+            failure_type = hard_case.get("failure_type", "unlabeled")
+            recommended = [strategy for strategy in select_strategies(failure_type) if strategy in candidates]
             search_space = recommended or available
+            context = _state_key(hard_case, retriever)
             context_key = (retriever, context)
-
             if any(counts[context_key].values()):
                 strategy = max(search_space, key=lambda item: values[context_key][item])
             elif any(global_counts[retriever].values()):
@@ -301,14 +331,6 @@ def _evaluate_contextual_bandit(
                 eval_split=_eval_split(qid, train_qids, test_qids),
             )
             rows.append(row)
-
-            counts[context_key][strategy] += 1
-            context_step = counts[context_key][strategy]
-            values[context_key][strategy] += (row["reward"] - values[context_key][strategy]) / context_step
-
-            global_counts[retriever][strategy] += 1
-            global_step = global_counts[retriever][strategy]
-            global_values[retriever][strategy] += (row["reward"] - global_values[retriever][strategy]) / global_step
 
     return rows
 
@@ -337,7 +359,7 @@ def _evaluate_offline_q_learning(
             state = _state_key(hard_case, retriever)
             candidates = records_by_key[(qid, retriever)]
             for strategy, record in candidates.items():
-                target = float(record["reward"]) + gamma * 0.0
+                target = _policy_reward(record) + gamma * 0.0
                 q_values[(retriever, state)][strategy].append(target)
                 fallback_values[retriever][strategy].append(target)
 
@@ -383,6 +405,24 @@ def _select_q_action(
     return "original" if "original" in available else available[0]
 
 
+def _fit_strategy_values(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    train_qids: set[str],
+    values: dict,
+    counts: dict,
+    total_counts: dict | None = None,
+) -> None:
+    for qid in train_qids:
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            for strategy, record in records_by_key[(qid, retriever)].items():
+                counts[retriever][strategy] += 1
+                if total_counts is not None:
+                    total_counts[retriever] += 1
+                step = counts[retriever][strategy]
+                reward = _policy_reward(record)
+                values[retriever][strategy] += (reward - values[retriever][strategy]) / step
+
+
 def _select_failure_type_policy(candidates: dict[str, dict], hard_case: dict) -> str:
     recommended = [strategy for strategy in select_strategies(hard_case.get("failure_type", "unlabeled")) if strategy in candidates]
     if not recommended:
@@ -390,8 +430,16 @@ def _select_failure_type_policy(candidates: dict[str, dict], hard_case: dict) ->
     return recommended[0]
 
 
+def _select_reward_selected(candidates: dict[str, dict], hard_case: dict) -> str:
+    return max(candidates, key=lambda strategy: _policy_reward(candidates[strategy]))
+
+
 def _select_oracle(candidates: dict[str, dict], hard_case: dict) -> str:
-    return max(candidates, key=lambda strategy: float(candidates[strategy]["reward"]))
+    return _select_reward_selected(candidates, hard_case)
+
+
+def _policy_reward(record: dict) -> float:
+    return float(record.get("reward_improvement", record.get("reward", 0.0)))
 
 
 def _retrievers_for_qid(records_by_key: dict[tuple[str, str], dict[str, dict]], qid: str) -> list[str]:
@@ -423,12 +471,24 @@ def _policy_row(
         "original_rank": original_rank or "",
         "original_success": bool(original_rank),
         "originally_failed": retriever in hard_case.get("failed_retrievers", []),
+        "gold_rank": record.get("gold_rank", ""),
         "reward": float(record["reward"]),
+        "policy_reward": _policy_reward(record),
         "recall@1": float(record["recall@1"]),
         "recall@5": float(record["recall@5"]),
         "recall@10": float(record["recall@10"]),
         "mrr": float(record["mrr"]),
         "answer_f1": float(record.get("answer_f1", 0.0)),
+        "original_gold_rank": record.get("original_gold_rank", ""),
+        "original_recall@10": float(record.get("original_recall@10", 0.0)),
+        "original_mrr": float(record.get("original_mrr", 0.0)),
+        "original_answer_f1": float(record.get("original_answer_f1", 0.0)),
+        "original_reward": float(record.get("original_reward", 0.0)),
+        "rank_improvement": int(record.get("rank_improvement", 0) or 0),
+        "recall10_improvement": float(record.get("recall10_improvement", 0.0)),
+        "mrr_improvement": float(record.get("mrr_improvement", 0.0)),
+        "answer_f1_improvement": float(record.get("answer_f1_improvement", 0.0)),
+        "reward_improvement": float(record.get("reward_improvement", 0.0)),
         "original_query_length": record.get("original_query_length", ""),
         "rewrite_query_length": record.get("rewrite_query_length", ""),
         "keyword_overlap": record.get("keyword_overlap", ""),
@@ -453,7 +513,9 @@ def _original_rank(hard_case: dict, retriever: str) -> int | None:
 def _state_key(hard_case: dict, retriever: str) -> str:
     failure_type = hard_case.get("failure_type", "unlabeled")
     failed_retrievers = hard_case.get("failed_retrievers", [])
-    query_length = len(tokenize(hard_case.get("question", "")))
+    question = hard_case.get("question", "")
+    query_tokens = tokenize(question)
+    query_length = len(query_tokens)
     original_rank = _original_rank(hard_case, retriever)
     if original_rank is None:
         rank_bucket = "failed"
@@ -470,7 +532,18 @@ def _state_key(hard_case: dict, retriever: str) -> str:
         length_bucket = "medium"
     else:
         length_bucket = "long"
-    return f"{failure_type}|{length_bucket}|{rank_bucket}|failed_count_{failure_count}"
+    failed_scope = "failed_" + "_".join(sorted(failed_retrievers)) if failed_retrievers else "no_failure"
+    digit_feature = "has_digit" if any(char.isdigit() for char in question) else "no_digit"
+    latin_feature = (
+        "has_latin"
+        if any(char.isascii() and char.isalpha() for char in question)
+        else "no_latin"
+    )
+    long_token_feature = "has_long_token" if any(len(token) >= 7 for token in query_tokens) else "no_long_token"
+    return (
+        f"{failure_type}|{length_bucket}|{rank_bucket}|failed_count_{failure_count}|"
+        f"{failed_scope}|{digit_feature}|{latin_feature}|{long_token_feature}"
+    )
 
 
 def _eval_split(qid: str, train_qids: set[str], test_qids: set[str]) -> str:
@@ -507,10 +580,58 @@ def _summarize_policy_rows(policy_rows: list[dict]) -> list[dict]:
                     "mrr": _mean(row["mrr"] for row in rows),
                     "answer_f1": _mean(row["answer_f1"] for row in rows),
                     "avg_reward": _mean(row["reward"] for row in rows),
+                    "avg_policy_reward": _mean(row["policy_reward"] for row in rows),
+                    "avg_rank_improvement": _mean(row["rank_improvement"] for row in rows),
+                    "recall10_improvement": _mean(row["recall10_improvement"] for row in rows),
+                    "mrr_improvement": _mean(row["mrr_improvement"] for row in rows),
+                    "answer_f1_improvement": _mean(row["answer_f1_improvement"] for row in rows),
+                    "reward_improvement": _mean(row["reward_improvement"] for row in rows),
                     "num_records": len(rows),
                 }
             )
     return summary
+
+
+def build_final_policy_comparison(policy_rows: list[dict], eval_split: str = "test") -> list[dict]:
+    """Build the report-facing comparison for items 13/14.
+
+    The learned policy is evaluated on the held-out split, so the fixed
+    baselines are also filtered to that same split for an apples-to-apples
+    final table.
+    """
+
+    rows = []
+    grouped = defaultdict(list)
+    for row in policy_rows:
+        if row["policy_name"] not in FINAL_POLICY_LABELS:
+            continue
+        if row.get("eval_split") != eval_split:
+            continue
+        grouped[(row["retriever"], row["policy_name"])].append(row)
+
+    for (retriever, policy_name), items in sorted(grouped.items()):
+        rows.append(
+            {
+                "eval_split": eval_split,
+                "retriever": retriever,
+                "comparison_method": FINAL_POLICY_LABELS[policy_name],
+                "policy_name": policy_name,
+                "recall@1": _mean(row["recall@1"] for row in items),
+                "recall@5": _mean(row["recall@5"] for row in items),
+                "recall@10": _mean(row["recall@10"] for row in items),
+                "mrr": _mean(row["mrr"] for row in items),
+                "answer_f1": _mean(row["answer_f1"] for row in items),
+                "avg_reward": _mean(row["reward"] for row in items),
+                "avg_policy_reward": _mean(row["policy_reward"] for row in items),
+                "avg_rank_improvement": _mean(row["rank_improvement"] for row in items),
+                "recall10_improvement": _mean(row["recall10_improvement"] for row in items),
+                "mrr_improvement": _mean(row["mrr_improvement"] for row in items),
+                "answer_f1_improvement": _mean(row["answer_f1_improvement"] for row in items),
+                "reward_improvement": _mean(row["reward_improvement"] for row in items),
+                "num_records": len(items),
+            }
+        )
+    return rows
 
 
 def _mean(values) -> float:

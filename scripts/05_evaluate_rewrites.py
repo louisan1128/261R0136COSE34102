@@ -19,6 +19,10 @@ def main():
 
     hard_cases = read_jsonl(data_config["hard_cases_path"])
     candidate_records = read_jsonl(data_config["rewrite_candidates_path"])
+    if candidate_records:
+        candidate_qids = {record["qid"] for record in candidate_records}
+        hard_cases = [record for record in hard_cases if record["qid"] in candidate_qids]
+        print(f"Evaluating {len(hard_cases)} hard cases with generated rewrite candidates.")
     retrievers = build_retrievers(config)
     reward_calculator = RewardCalculator(
         alpha=config["reward"]["alpha"],

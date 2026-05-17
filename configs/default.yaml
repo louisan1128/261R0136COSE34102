@@ -33,6 +33,12 @@ llm_rewrite:
   temperature: 0.2
   max_tokens: 96
   timeout_seconds: 30
+  # RPM limit 3 means one request every ~20s; 21s leaves a small buffer.
+  request_delay_seconds: 21
+  max_retries: 8
+  sample_size: 100
+  sample_seed: 7
+  sample_path: data/outputs/hard_cases_random_sample.jsonl
   allow_fallback: true
   cache_path: data/outputs/llm_rewrite_cache.jsonl
 
@@ -56,4 +62,5 @@ data:
   policy_results_path: data/outputs/policy_results.csv
   policy_summary_path: data/outputs/policy_summary.csv
   policy_summary_hard_cases_path: data/outputs/policy_summary_hard_cases.csv
+  final_comparison_path: data/outputs/final_policy_comparison.csv
   embedding_dir: embeddings

@@ -45,6 +45,7 @@ python scripts/07_build_analysis_tables.py
 python scripts/09_sweep_hybrid_alpha.py
 python scripts/10_evaluate_rewrite_policies.py
 python scripts/11_build_report_artifacts.py
+python scripts/12_build_results_dashboard.py
 ```
 
 Optional real LLM rewrite generation:
@@ -75,9 +76,12 @@ python scripts/08_run_sentence_dense_retrieval.py
 - `data/outputs/reward_ablation_results.csv`: Reward ablation.
 - `data/outputs/policy_results.csv`: Per-query policy decisions and state features.
 - `data/outputs/policy_summary.csv`: Policy comparison.
+- `data/outputs/final_policy_comparison.csv`: Final held-out comparison of original, rule-based, LLM, reward-selected, and RL-selected rewrites.
 - `data/outputs/hybrid_alpha_sweep.csv`: Hybrid BM25/dense weight sweep.
 - `results/qualitative_examples.csv`: Report-ready recovery and non-recovery examples.
 - `results/failure_type_manual_check.csv`: 100-example failure label review sheet.
+- `docs/results_dashboard.html`: One-page visual dashboard for the current experiment outputs.
+- `docs/results_summary.md`: Compact text summary of the current experiment outputs.
 
 Report-facing CSVs are mirrored under `results/`.
 
