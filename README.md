@@ -34,7 +34,6 @@ The `llm` action can use an external OpenAI-compatible LLM. By default it falls 
 
 ## Pipeline
 
-```bash
 python scripts/01_build_dataset.py
 python scripts/02_run_original_retrieval.py
 python scripts/03_build_hard_cases.py
@@ -46,14 +45,42 @@ python scripts/09_sweep_hybrid_alpha.py
 python scripts/10_evaluate_rewrite_policies.py
 python scripts/11_build_report_artifacts.py
 python scripts/12_build_results_dashboard.py
-```
+
+NLP/bin/python scripts/01_build_dataset.py
+NLP/bin/python scripts/02_original_retrieval.py
+NLP/bin/python scripts/03_extract_hard_cases.py
+NLP/bin/python scripts/04_annotation_prepare.py
+NLP/bin/python scripts/05_annotation_assist.py
+NLP/bin/python scripts/06_annotation_finalize.py
+NLP/bin/python scripts/07_generate_rewrites.py
+NLP/bin/python scripts/08_rewrite_retrieval_eval.py
+NLP/bin/python scripts/09_reward_selection.py
+NLP/bin/python scripts/10_analysis_tables.py
+NLP/bin/python scripts/12_hybrid_alpha_sweep.py
+NLP/bin/python scripts/13_rewrite_policy_eval.py
+NLP/bin/python scripts/14_report_builder.py
+
+
+`scripts/01_build_dataset.py` builds `data/processed/corpus.jsonl` and
+`data/processed/qa_pairs.jsonl` from the datasets listed in `configs/default.yaml`.
+By default it prepares KorQuAD 1.0, KLUE-MRC, and KorQuAD 2.0 filtered QA data.
+It also writes dataset-specific files such as `korquad1_qa_pairs.jsonl`,
+`klue_mrc_qa_pairs.jsonl`, and `korquad2_filtered_qa_pairs.jsonl`.
+KorQuAD 2.0 is filtered toward question types missing or rare in KorQuAD 1.0
+and KLUE-MRC.
+For KorQuAD 2.0, place QA pairs at `data/raw/qa_pairs_2(1).jsonl` and chunk
+corpus at `data/raw/korquad2_chunks.jsonl` with `chunk_id`, `doc_id`, and `text`.
+If the chunk corpus is missing, the builder can create
+`data/raw/korquad2_chunks.jsonl` from the local `data/processed/qa_pairs_2.jsonl`;
+those synthetic chunks use title and answer text because the original context is
+not present in that local file.
 
 Optional real LLM rewrite generation:
 
 ```powershell
 $env:OPENAI_API_KEY="..."
 $env:OPENAI_MODEL="..."
-python scripts/04_generate_rewrites.py --use-external-llm
+NLP/bin/python scripts/07_generate_rewrites.py --use-external-llm
 ```
 
 Generated LLM rewrites are cached at `data/outputs/llm_rewrite_cache.jsonl` to avoid repeated API calls.
@@ -61,13 +88,14 @@ Generated LLM rewrites are cached at `data/outputs/llm_rewrite_cache.jsonl` to a
 Optional dense-only baseline:
 
 ```bash
-python scripts/08_run_sentence_dense_retrieval.py
+NLP/bin/python scripts/11_sentence_dense_retrieval.py
 ```
 
 ## Outputs
 
 - `data/outputs/original_results.csv`: Initial retrieval metrics with Recall@K, MRR, and Answer F1.
 - `data/outputs/hard_cases.jsonl`: Original-query hard retrieval cases.
+- `data/outputs/annotation/hard_subset_300_annotation.csv`: Manual annotation sheet for sampled hard cases.
 - `data/outputs/rewrite_candidates.jsonl`: Rewrite candidates for each hard case.
 - `data/outputs/rewrite_results.jsonl`: Full reward table for every `(question, retriever, action)`.
 - `data/outputs/hard_case_recovery.csv`: Reward-selected recovery rate.

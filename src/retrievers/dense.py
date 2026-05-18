@@ -24,10 +24,12 @@ class DenseRetriever(BaseRetriever):
         model_name: str = "intfloat/multilingual-e5-base",
         embedding_dir: str = "embeddings",
         backend: str = "auto",
+        device: str | None = None,
     ):
         super().__init__(corpus_path)
         self.model_name = model_name
         self.backend = backend
+        self.device = self._resolve_device(device)
         self.embedding_dir = Path(embedding_dir)
         self.embedding_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,13 +63,29 @@ class DenseRetriever(BaseRetriever):
             self.backend = "lexical"
             return
         try:
-            self.model = SentenceTransformer(self.model_name)
+            kwargs = {"device": self.device} if self.device else {}
+            self.model = SentenceTransformer(self.model_name, **kwargs)
             self.backend = "sentence_transformers"
         except Exception as exc:
             if self.backend == "sentence_transformers":
                 raise exc
             print(f"Falling back to lexical dense backend: {exc}")
             self.backend = "lexical"
+
+    def _resolve_device(self, device: str | None) -> str | None:
+        if not device or device == "auto":
+            return device
+        if device != "mps":
+            return device
+        try:
+            import torch
+        except Exception:
+            print("Requested MPS device, but torch is unavailable. Falling back to default device.")
+            return None
+        if torch.backends.mps.is_available():
+            return "mps"
+        print("Requested MPS device, but MPS is unavailable. Falling back to default device.")
+        return None
 
     def _load_sentence_transformer(self):
         try:

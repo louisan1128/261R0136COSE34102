@@ -11,6 +11,7 @@ def build_retrievers(config: dict) -> dict:
         model_name=config["model_name"],
         embedding_dir=data_config["embedding_dir"],
         backend=config.get("dense_backend", "auto"),
+        device=config.get("dense_device"),
     )
     hybrid = HybridRetriever(bm25, dense, alpha=config["hybrid"]["alpha"])
     return {"bm25": bm25, "dense": dense, "hybrid": hybrid}

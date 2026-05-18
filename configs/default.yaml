@@ -6,6 +6,7 @@ project_title: "Offline Reinforcement Learning for Korean Query Rewriting in RAG
 # Use "lexical" only for fast offline smoke tests.
 model_name: intfloat/multilingual-e5-base
 dense_backend: sentence_transformers  # lexical | sentence_transformers | auto
+dense_device: mps  # mps | cpu | cuda | auto
 
 reward:
   alpha: 1.0
@@ -44,10 +45,20 @@ llm_rewrite:
 
 data:
   raw_path: data/raw/KorQuAD_v1.0_dev.json
+  datasets: ["korquad1", "klue_mrc", "korquad2"]
+  korquad1_path: data/raw/KorQuAD_v1.0_dev.json
+  korquad2_qa_path: data/processed/qa_pairs_2.jsonl
+  korquad2_qa_fallback_path: data/raw/qa_pairs_2(1).jsonl
+  korquad2_chunk_path: data/raw/korquad2_chunks.jsonl
+  korquad2_build_chunks_from_qa: true
+  korquad2_focus_missing_question_types: true
+  korquad2_focus_top_k_question_types: 6
+  write_dataset_files: true
+  klue_mrc_split: validation
   limit:
   corpus_path: data/processed/corpus.jsonl
   qa_path: data/processed/qa_pairs.jsonl
-  hard_cases_path: data/outputs/hard_cases.jsonl
+  hard_cases_path: data/outputs/hard_cases/hard_subset_300.jsonl
   original_results_path: data/outputs/original_results.csv
   rewrite_candidates_path: data/outputs/rewrite_candidates.jsonl
   rewrite_results_path: data/outputs/rewrite_results.jsonl
