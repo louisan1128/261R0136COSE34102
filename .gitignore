@@ -1,31 +1,14 @@
-# Python bytecode and caches
-__pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Local virtual environments
-.venv/
-venv/
-env/
-
-# Secrets and local environment overrides
-.env
-.env.*
-!.env.example
-
-# IDE / OS noise
-.idea/
-.vscode/
+# macOS
 .DS_Store
-Thumbs.db
 
-# Generated dense-retrieval indexes are large and reproducible.
-embeddings/
+# Python
+__pycache__/
+*.pyc
 
-# Keep experiment outputs, reports, and dashboards tracked:
-# data/outputs/
-# results/
-# docs/
+# virtual env
+NLP/
+venv/
+.env
+
+# raw data
+data/raw/
