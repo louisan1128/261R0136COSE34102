@@ -1,0 +1,30 @@
+{
+  "total_questions": 1000,
+  "total_rewrite_candidates": 5000,
+  "rewrite_type_distribution": {
+    "original": 1000,
+    "keyword_rewrite": 1000,
+    "semantic_rewrite": 1000,
+    "structured_rewrite": 1000,
+    "llm_rewrite": 1000
+  },
+  "failure_label_distribution": {
+    "missing_key_term": 275,
+    "numeric_temporal_mismatch": 218,
+    "ambiguous": 59,
+    "entity_mismatch": 98,
+    "lexical_mismatch": 310,
+    "context_boundary_issue": 39,
+    "semantic_mismatch": 1
+  },
+  "dataset_distribution": {
+    "klue_mrc": 350,
+    "korquad1": 200,
+    "korquad2": 450
+  },
+  "empty_query_count": 0,
+  "invalid_candidate_count": 0,
+  "answer_leakage_count": 0,
+  "output_jsonl": "data\\outputs\\rewrite_candidates\\hard_subset_1000_rewrite_candidates.jsonl",
+  "output_csv": "data\\outputs\\rewrite_candidates\\hard_subset_1000_rewrite_candidates.csv"
+}

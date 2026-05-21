@@ -18,11 +18,11 @@ from src.utils.io import ensure_dir, read_jsonl, read_yaml
 from src.utils.text import extract_keywords, tokenize
 
 
-DEFAULT_INPUT_PATH = Path("data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl")
+DEFAULT_INPUT_PATH = Path("data/outputs/annotation/hard_subset_1000_annotation_final.jsonl")
 DEFAULT_OUTPUT_DIR = Path("data/outputs/rewrite_candidates")
-OUTPUT_JSONL_NAME = "hard_subset_850_rewrite_candidates.jsonl"
-OUTPUT_CSV_NAME = "hard_subset_850_rewrite_candidates.csv"
-SUMMARY_NAME = "rewrite_candidate_summary_850.json"
+OUTPUT_JSONL_NAME = "hard_subset_1000_rewrite_candidates.jsonl"
+OUTPUT_CSV_NAME = "hard_subset_1000_rewrite_candidates.csv"
+SUMMARY_NAME = "rewrite_candidate_summary_1000.json"
 
 REWRITE_TYPE_ORDER = [
     "original",
@@ -152,8 +152,8 @@ def main() -> None:
 
     config = read_yaml(root / "configs" / "default.yaml")
     records = read_jsonl(input_path)
-    if len(records) != 850:
-        raise ValueError(f"Input row count must be 850 for hard_subset_850, got {len(records)}")
+    if len(records) != 1000:
+        raise ValueError(f"Input row count must be 1000 for hard_subset_1000, got {len(records)}")
 
     rewriter, rewrite_cache, cache_path, llm_delay_seconds = _maybe_build_rewriter(config, args)
     output_records = []
@@ -462,10 +462,9 @@ def _validate_outputs(
 
     if len(output_records) != len(input_records):
         raise ValueError(f"Output JSONL record count {len(output_records)} != input count {len(input_records)}")
-    if len(output_records) != 850:
-        raise ValueError(f"Output JSONL row count must be 850, got {len(output_records)}")
-    if len(csv_rows) != 4250:
-        raise ValueError(f"CSV row count must be 4250, got {len(csv_rows)}")
+    expected_csv_rows = len(input_records) * len(REWRITE_TYPE_ORDER)
+    if len(csv_rows) != expected_csv_rows:
+        raise ValueError(f"CSV row count must be {expected_csv_rows}, got {len(csv_rows)}")
 
     for input_record, output_record in zip(input_records, output_records):
         question = _clean_query(input_record.get("question", ""))
@@ -553,9 +552,17 @@ def _write_text(payload: str, path: Path, overwrite: bool = False) -> None:
         if current == payload:
             print(f"Existing identical file kept: {path}")
             return
+        if _normalize_newlines(current) == _normalize_newlines(payload):
+            print(f"Existing equivalent file kept: {path}")
+            return
         if not overwrite:
             raise FileExistsError(f"Refusing to overwrite existing file: {path}; rerun with --overwrite to replace it.")
-    path.write_text(payload, encoding="utf-8")
+    with path.open("w", encoding="utf-8", newline="") as fout:
+        fout.write(payload)
+
+
+def _normalize_newlines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _print_summary(
@@ -597,7 +604,7 @@ def _wait_for_request_slot(last_request_at: float, delay_seconds: float) -> floa
 
 def _cache_key(question: str, failure_label: str, secondary_label: str, question_type: str) -> str:
     # Cache by question text so older 300-case LLM rewrites can be reused when
-    # the same question appears in the 850-case experiment.
+    # the same question appears in a larger hard-subset experiment.
     return question
 
 

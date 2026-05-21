@@ -1,0 +1,59 @@
+{
+  "total_records": 1000,
+  "auto_annotated_count": 661,
+  "needs_review_count": 339,
+  "dataset_counts": {
+    "klue_mrc": 350,
+    "korquad1": 200,
+    "korquad2": 450
+  },
+  "question_type_counts": {
+    "comparison": 59,
+    "definition": 25,
+    "how": 186,
+    "list": 11,
+    "numeric": 99,
+    "other": 259,
+    "what": 48,
+    "when": 14,
+    "where": 25,
+    "who": 86,
+    "why": 80,
+    "yes_no": 108
+  },
+  "failure_type_counts": {
+    "abbreviation": 93,
+    "compound_noun": 15,
+    "ellipsis": 178,
+    "expression_mismatch": 190,
+    "temporal_numeric": 185,
+    "unlabeled": 339
+  },
+  "suggested_failure_label_counts": {
+    "lexical_mismatch": 298,
+    "missing_key_term": 178,
+    "numeric_temporal_mismatch": 185,
+    "other": 339
+  },
+  "failure_label_counts": {
+    "": 52,
+    "ambiguous": 7,
+    "context_boundary_issue": 39,
+    "entity_mismatch": 98,
+    "lexical_mismatch": 310,
+    "missing_key_term": 275,
+    "numeric_temporal_mismatch": 218,
+    "semantic_mismatch": 1
+  },
+  "secondary_failure_label_counts": {
+    "": 854,
+    "context_boundary_issue": 16,
+    "entity_mismatch": 94,
+    "missing_key_term": 9,
+    "numeric_temporal_mismatch": 27
+  },
+  "annotation_priority_counts": {
+    "high": 339,
+    "low": 661
+  }
+}

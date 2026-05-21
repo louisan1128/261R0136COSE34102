@@ -39,6 +39,20 @@ def build_failure_type_analysis(rewrite_results: list[dict], out_path: str) -> l
     return rows
 
 
+def build_failure_label_analysis(rewrite_results: list[dict], out_path: str) -> list[dict]:
+    rows = _group_mean(
+        rewrite_results,
+        ["failure_label", "retriever", "strategy"],
+        ["recall@10", "mrr", "answer_f1", "reward"],
+    )
+    write_csv(
+        rows,
+        out_path,
+        fieldnames=["failure_label", "retriever", "strategy", "recall@10", "mrr", "answer_f1", "reward", "num_records"],
+    )
+    return rows
+
+
 def build_retriever_specific_results(rewrite_results: list[dict], out_path: str) -> list[dict]:
     rows = _group_mean(rewrite_results, ["retriever", "strategy", "policy_recommended"], ["recall@10", "mrr", "answer_f1", "reward"])
     write_csv(rows, out_path, fieldnames=["retriever", "strategy", "policy_recommended", "recall@10", "mrr", "answer_f1", "reward", "num_records"])

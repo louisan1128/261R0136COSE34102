@@ -9,6 +9,11 @@ from src.rewriting.policy import select_strategies
 from src.utils.io import ensure_dir
 from src.utils.text import tokenize
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
+
 
 STRATEGY_ALIASES = {
     "original": "original",
@@ -36,7 +41,8 @@ def evaluate_rewrites(
     generator = RewriteCandidateGenerator()
     candidates_by_qid = {record["qid"]: _candidate_queries(record) for record in candidate_records or []}
     rewrite_results = []
-    for hard_case in hard_cases:
+    progress = tqdm(hard_cases, desc="Evaluating rewrites", unit="case") if tqdm else hard_cases
+    for hard_case in progress:
         question = hard_case["question"]
         answer = hard_case.get("answer", "")
         gold_doc_id = hard_case["gold_doc_id"]

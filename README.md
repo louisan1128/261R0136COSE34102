@@ -40,8 +40,8 @@ NLP/bin/python scripts/02_original_retrieval.py
 NLP/bin/python scripts/03_extract_hard_cases.py
 NLP/bin/python scripts/04_annotation_prepare.py
 NLP/bin/python scripts/05_annotation_assist.py
-NLP/bin/python scripts/06_annotation_finalize.py --input data/outputs/hard_cases/hard_subset_850.jsonl
-NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
+NLP/bin/python scripts/06_annotation_finalize.py --input data/outputs/hard_cases/hard_subset_1000.jsonl
+NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_1000_annotation_final.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
 NLP/bin/python scripts/08_rewrite_retrieval_eval.py
 NLP/bin/python scripts/09_reward_selection.py
 NLP/bin/python scripts/10_analysis_tables.py
@@ -53,10 +53,13 @@ NLP/bin/python scripts/15_rebuild_korquad2_real_chunks.py
 NLP/bin/python scripts/16_diagnose_korquad2_chunks.py
 ```
 
-The current run uses the finalized 850-case annotation file at
-`data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl`. Rewrite
+The current run uses the finalized 1000-case annotation file at
+`data/outputs/annotation/hard_subset_1000_annotation_final.jsonl`. Rewrite
 candidates are read from
-`data/outputs/rewrite_candidates/hard_subset_850_rewrite_candidates.jsonl`.
+`data/outputs/rewrite_candidates/hard_subset_1000_rewrite_candidates.jsonl`.
+
+The 1000-case hard subset keeps the previous 850 cases and adds 150 KorQuAD 1.0
+train hard cases selected from a sampled 5000-question train subset.
 
 
 `scripts/01_build_dataset.py` builds `data/processed/corpus.jsonl` and
@@ -78,7 +81,7 @@ Optional real LLM rewrite generation:
 ```powershell
 $env:OPENAI_API_KEY="..."
 $env:OPENAI_MODEL="..."
-NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
+NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_1000_annotation_final.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
 ```
 
 Generated LLM rewrites are cached at `data/outputs/llm_rewrite_cache.jsonl` to avoid repeated API calls.
@@ -93,9 +96,9 @@ NLP/bin/python scripts/11_sentence_dense_retrieval.py
 
 - `data/outputs/original_results.csv`: Initial retrieval metrics with Recall@K, MRR, and Answer F1.
 - `data/outputs/hard_cases.jsonl`: Original-query hard retrieval cases.
-- `data/outputs/hard_cases/hard_subset_850.jsonl`: Current sampled hard and near-hard subset.
-- `data/outputs/annotation/hard_subset_850_annotation_final.csv`: Auto-finalized annotation sheet for sampled hard cases.
-- `data/outputs/rewrites/hard_subset_850_rewrites.jsonl`: Rewrite candidates for each hard case.
+- `data/outputs/hard_cases/hard_subset_1000.jsonl`: Current sampled hard and near-hard subset.
+- `data/outputs/annotation/hard_subset_1000_annotation_final.csv`: Auto-finalized annotation sheet for sampled hard cases.
+- `data/outputs/rewrite_candidates/hard_subset_1000_rewrite_candidates.jsonl`: Rewrite candidates for each hard case.
 - `data/outputs/rewrite_results.jsonl`: Full reward table for every `(question, retriever, action)`.
 - `data/outputs/hard_case_recovery.csv`: Reward-selected recovery rate.
 - `data/outputs/main_results.csv`: Strategy-level aggregate results.

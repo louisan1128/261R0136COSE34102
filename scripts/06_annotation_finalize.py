@@ -14,8 +14,12 @@ sys.path.append(str(root))
 from src.utils.io import ensure_dir, read_jsonl, write_jsonl
 
 
-DEFAULT_INPUT_PATH = Path("data/outputs/hard_cases/hard_subset_850.jsonl")
+DEFAULT_INPUT_PATH = Path("data/outputs/hard_cases/hard_subset_1000.jsonl")
 OUTPUT_DIR = Path("data/outputs/annotation")
+PREVIOUS_ANNOTATION_PATHS = [
+    OUTPUT_DIR / "hard_subset_850_annotation_final_v2.jsonl",
+    OUTPUT_DIR / "hard_subset_850_annotation_final.jsonl",
+]
 
 FAILURE_TYPE_TO_LABEL = {
     "expression_mismatch": "lexical_mismatch",
@@ -74,22 +78,23 @@ def main() -> None:
 
     ensure_dir(OUTPUT_DIR)
     hard_cases = read_jsonl(input_path)
+    previous_by_qid = _load_previous_annotations(PREVIOUS_ANNOTATION_PATHS)
 
     annotation_records = [_make_annotation_record(record) for record in hard_cases]
     assist_records = [_make_assist_record(record) for record in annotation_records]
-    final_records = [_make_final_record(record) for record in assist_records]
+    final_records = [_make_final_record(record, previous_by_qid) for record in assist_records]
     needs_review = [record for record in final_records if _needs_review(record)]
 
     paths = {
-        "annotation_jsonl": OUTPUT_DIR / "hard_subset_850_annotation.jsonl",
-        "annotation_csv": OUTPUT_DIR / "hard_subset_850_annotation.csv",
-        "assist_jsonl": OUTPUT_DIR / "hard_subset_850_annotation_assist.jsonl",
-        "assist_csv": OUTPUT_DIR / "hard_subset_850_annotation_assist.csv",
-        "needs_review_jsonl": OUTPUT_DIR / "hard_subset_850_needs_review.jsonl",
-        "needs_review_csv": OUTPUT_DIR / "hard_subset_850_needs_review.csv",
-        "final_jsonl": OUTPUT_DIR / "hard_subset_850_annotation_final.jsonl",
-        "final_csv": OUTPUT_DIR / "hard_subset_850_annotation_final.csv",
-        "summary": OUTPUT_DIR / "final_annotation_summary_850.json",
+        "annotation_jsonl": OUTPUT_DIR / "hard_subset_1000_annotation.jsonl",
+        "annotation_csv": OUTPUT_DIR / "hard_subset_1000_annotation.csv",
+        "assist_jsonl": OUTPUT_DIR / "hard_subset_1000_annotation_assist.jsonl",
+        "assist_csv": OUTPUT_DIR / "hard_subset_1000_annotation_assist.csv",
+        "needs_review_jsonl": OUTPUT_DIR / "hard_subset_1000_needs_review.jsonl",
+        "needs_review_csv": OUTPUT_DIR / "hard_subset_1000_needs_review.csv",
+        "final_jsonl": OUTPUT_DIR / "hard_subset_1000_annotation_final.jsonl",
+        "final_csv": OUTPUT_DIR / "hard_subset_1000_annotation_final.csv",
+        "summary": OUTPUT_DIR / "final_annotation_summary_1000.json",
     }
 
     write_jsonl(annotation_records, paths["annotation_jsonl"])
@@ -121,8 +126,24 @@ def _make_assist_record(record: dict[str, Any]) -> dict[str, Any]:
     return assist
 
 
-def _make_final_record(record: dict[str, Any]) -> dict[str, Any]:
+def _make_final_record(record: dict[str, Any], previous_by_qid: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     final = dict(record)
+    previous = (previous_by_qid or {}).get(str(final.get("qid", "")))
+    if previous:
+        for key in (
+            "failure_label",
+            "secondary_failure_label",
+            "annotation_note",
+            "needs_gold_check",
+            "annotator",
+            "annotated",
+            "suggested_failure_label",
+            "annotation_priority",
+        ):
+            if key in previous:
+                final[key] = previous[key]
+        return final
+
     suggested = str(final.get("suggested_failure_label", "")).strip()
 
     final["failure_label"] = suggested if suggested in AUTO_LABELS else ""
@@ -130,6 +151,18 @@ def _make_final_record(record: dict[str, Any]) -> dict[str, Any]:
     final["annotated"] = bool(final["failure_label"])
     final["annotation_priority"] = _annotation_priority(final)
     return final
+
+
+def _load_previous_annotations(paths: list[Path]) -> dict[str, dict[str, Any]]:
+    records = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        for record in read_jsonl(path):
+            qid = str(record.get("qid", "")).strip()
+            if qid and qid not in records:
+                records[qid] = record
+    return records
 
 
 def _secondary_failure_label(record: dict[str, Any]) -> str:

@@ -1,23 +1,23 @@
 {
   "korquad1": {
     "bm25": {
-      "num_queries": 5774,
-      "recall_at_10": 0.9790439903013509,
-      "mrr": 0.90718457397969,
+      "num_queries": 10774,
+      "recall_at_10": 0.9647299053276406,
+      "mrr": 0.8906774023884652,
       "missing_gold_count": 0,
       "skipped_count": 0
     },
     "dense": {
-      "num_queries": 5774,
-      "recall_at_10": 0.970557672324212,
-      "mrr": 0.8471917764912222,
+      "num_queries": 10774,
+      "recall_at_10": 0.9475589381845183,
+      "mrr": 0.8236672427154123,
       "missing_gold_count": 0,
       "skipped_count": 0
     },
     "hybrid": {
-      "num_queries": 5774,
-      "recall_at_10": 0.9863179771388985,
-      "mrr": 0.9183414567766837,
+      "num_queries": 10774,
+      "recall_at_10": 0.9792092073510302,
+      "mrr": 0.9038010009399458,
       "missing_gold_count": 0,
       "skipped_count": 0
     }

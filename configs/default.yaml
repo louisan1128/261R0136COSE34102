@@ -34,12 +34,12 @@ llm_rewrite:
   temperature: 0.2
   max_tokens: 96
   timeout_seconds: 30
-  # RPM limit 3 means one request every ~20s; 21s leaves a small buffer.
-  request_delay_seconds: 21
+  # Lower delay speeds up rewrite generation; increase if the API rate limit is hit.
+  request_delay_seconds: 5
   max_retries: 8
-  sample_size: 850
+  sample_size: 1000
   sample_seed: 7
-  sample_path: data/outputs/hard_cases/hard_subset_850.jsonl
+  sample_path: data/outputs/hard_cases/hard_subset_1000.jsonl
   allow_fallback: true
   cache_path: data/outputs/llm_rewrite_cache.jsonl
 
@@ -47,6 +47,9 @@ data:
   raw_path: data/raw/KorQuAD_v1.0_dev.json
   datasets: ["korquad1", "klue_mrc", "korquad2"]
   korquad1_path: data/raw/KorQuAD_v1.0_dev.json
+  korquad1_train_path: data/raw/KorQuAD_v1.0_train.json
+  korquad1_train_sample_size: 5000
+  korquad1_train_sample_seed: 7
   korquad2_qa_path: data/processed/qa_pairs_2.jsonl
   korquad2_qa_fallback_path: data/raw/qa_pairs_2(1).jsonl
   korquad2_chunk_path: data/raw/korquad2_chunks.jsonl
@@ -58,9 +61,9 @@ data:
   limit:
   corpus_path: data/processed/corpus.jsonl
   qa_path: data/processed/qa_pairs.jsonl
-  hard_cases_path: data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl
+  hard_cases_path: data/outputs/annotation/hard_subset_1000_annotation_final.jsonl
   original_results_path: data/outputs/original_results.csv
-  rewrite_candidates_path: data/outputs/rewrite_candidates/hard_subset_850_rewrite_candidates.jsonl
+  rewrite_candidates_path: data/outputs/rewrite_candidates/hard_subset_1000_rewrite_candidates.jsonl
   rewrite_results_path: data/outputs/rewrite_results.jsonl
   best_queries_path: data/outputs/best_queries.jsonl
   recovery_path: data/outputs/hard_case_recovery.csv

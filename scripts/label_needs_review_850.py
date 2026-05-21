@@ -15,9 +15,9 @@ sys.path.append(str(root))
 from src.utils.io import ensure_dir, read_jsonl, write_jsonl
 
 
-DEFAULT_INPUT = Path("data/outputs/annotation/hard_subset_850_needs_review.jsonl")
-DEFAULT_JSONL_OUTPUT = Path("data/outputs/annotation/hard_subset_850_needs_review_labeled.jsonl")
-DEFAULT_CSV_OUTPUT = Path("data/outputs/annotation/hard_subset_850_needs_review_labeled.csv")
+DEFAULT_INPUT = Path("data/outputs/annotation/hard_subset_1000_needs_review.jsonl")
+DEFAULT_JSONL_OUTPUT = Path("data/outputs/annotation/hard_subset_1000_needs_review_labeled.jsonl")
+DEFAULT_CSV_OUTPUT = Path("data/outputs/annotation/hard_subset_1000_needs_review_labeled.csv")
 
 CORPUS_PATHS = {
     "korquad1": Path("data/processed/korquad1_corpus.jsonl"),

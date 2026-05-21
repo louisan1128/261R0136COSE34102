@@ -1,6 +1,7 @@
 from collections import Counter
 import html
 from pathlib import Path
+import random
 import re
 from typing import Any
 
@@ -69,60 +70,97 @@ def _add_korquad1(
     summary: dict[str, Counter],
     limit: int | None,
 ) -> None:
-    raw_path = Path(data_config.get("korquad1_path") or data_config.get("raw_path", ""))
-    if not raw_path.exists():
-        raise FileNotFoundError(f"KorQuAD 1.0 raw file not found: {raw_path}")
-
-    raw_data = read_json(raw_path)
-    articles = raw_data.get("data", raw_data) if isinstance(raw_data, dict) else raw_data
-    if not isinstance(articles, list):
-        raise ValueError("Unsupported KorQuAD 1.0 format. Expected a JSON object with a data list.")
-
-    split = _infer_split(raw_path, data_config.get("korquad1_split"))
     dataset = "korquad1"
-    prefix = f"{dataset}_{split}"
-    corpus_counter = 0
-    qa_counter = 0
+    rng = random.Random(int(data_config.get("korquad1_train_sample_seed", 7)))
+    train_sample_size = data_config.get("korquad1_train_sample_size")
 
-    for article in articles:
-        title = str(article.get("title", "")).strip() if isinstance(article, dict) else ""
-        for paragraph in _iter_paragraphs(article):
-            context = _get_context(paragraph)
-            if not context:
-                continue
+    for raw_path in _korquad1_raw_paths(data_config):
+        if not raw_path.exists():
+            raise FileNotFoundError(f"KorQuAD 1.0 raw file not found: {raw_path}")
 
+        split = _infer_split(raw_path, data_config.get("korquad1_split") if "train" not in raw_path.name.lower() else None)
+        prefix = f"{dataset}_{split}"
+        corpus_counter = 0
+        qa_counter = 0
+
+        qa_items = _load_korquad1_qa_items(raw_path, split)
+        if split == "train" and train_sample_size:
+            sample_size = min(int(train_sample_size), len(qa_items))
+            qa_items = sorted(rng.sample(qa_items, sample_size), key=lambda item: item["source_index"])
+
+        for item in qa_items:
             pid = _get_or_add_corpus(
                 corpus=corpus,
                 context_to_pid=context_to_pid,
                 dataset=dataset,
-                text=context,
+                text=item["context"],
                 pid=f"{prefix}_{corpus_counter:06d}",
-                title=title,
+                title=item["title"],
                 source_doc_id=f"{prefix}_{corpus_counter:06d}",
             )
             if pid == f"{prefix}_{corpus_counter:06d}":
                 corpus_counter += 1
                 summary["corpus"][dataset] += 1
 
+            qa_pairs.append(
+                _make_qa_record(
+                    qid=f"{prefix}_q_{qa_counter:06d}",
+                    dataset=dataset,
+                    question=item["question"],
+                    answer=item["answer"],
+                    gold_pid=pid,
+                    gold_passage=item["context"],
+                    extra_fields={
+                        "source_split": split,
+                        "source_qid": item["source_qid"],
+                    },
+                )
+            )
+            qa_counter += 1
+            summary["qa"][dataset] += 1
+            if limit and summary["qa"][dataset] >= limit:
+                return
+
+
+def _korquad1_raw_paths(data_config: dict[str, Any]) -> list[Path]:
+    paths = [Path(data_config.get("korquad1_path") or data_config.get("raw_path", ""))]
+    train_path = data_config.get("korquad1_train_path")
+    if train_path:
+        paths.append(Path(train_path))
+    return paths
+
+
+def _load_korquad1_qa_items(raw_path: Path, split: str) -> list[dict[str, str | int]]:
+    raw_data = read_json(raw_path)
+    articles = raw_data.get("data", raw_data) if isinstance(raw_data, dict) else raw_data
+    if not isinstance(articles, list):
+        raise ValueError("Unsupported KorQuAD 1.0 format. Expected a JSON object with a data list.")
+
+    items = []
+    source_index = 0
+    for article in articles:
+        title = str(article.get("title", "")).strip() if isinstance(article, dict) else ""
+        for paragraph in _iter_paragraphs(article):
+            context = _get_context(paragraph)
+            if not context:
+                continue
             for qa in _iter_qas(paragraph):
                 question = _get_question(qa)
                 if not question:
                     continue
-                answer = _extract_answer_text(qa.get("answers") or qa.get("answer") or [])
-                qa_pairs.append(
-                    _make_qa_record(
-                        qid=f"{prefix}_q_{qa_counter:06d}",
-                        dataset=dataset,
-                        question=question,
-                        answer=answer,
-                        gold_pid=pid,
-                        gold_passage=context,
-                    )
+                items.append(
+                    {
+                        "split": split,
+                        "title": title,
+                        "context": context,
+                        "question": question,
+                        "answer": _extract_answer_text(qa.get("answers") or qa.get("answer") or []),
+                        "source_qid": str(qa.get("id") or qa.get("guid") or ""),
+                        "source_index": source_index,
+                    }
                 )
-                qa_counter += 1
-                summary["qa"][dataset] += 1
-                if limit and summary["qa"][dataset] >= limit:
-                    return
+                source_index += 1
+    return items
 
 
 def _add_klue_mrc(
@@ -321,6 +359,7 @@ def _make_qa_record(
     answer: str,
     gold_pid: str,
     gold_passage: str,
+    extra_fields: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     record = {
         "qid": qid,
@@ -333,6 +372,8 @@ def _make_qa_record(
     }
     if gold_passage:
         record["gold_passage"] = gold_passage
+    if extra_fields:
+        record.update(extra_fields)
     return record
 
 

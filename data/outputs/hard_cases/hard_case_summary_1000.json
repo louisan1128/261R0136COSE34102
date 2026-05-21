@@ -1,0 +1,10 @@
+{
+  "sampling_seed": 42,
+  "source_retriever": "hybrid",
+  "base_subset": "data\\outputs\\annotation\\hard_subset_850_annotation_final_v2.jsonl",
+  "base_count": 850,
+  "added_korquad1_train_count": 150,
+  "total_sampled": 1000,
+  "korquad1_train_strict_hard_count": 87,
+  "korquad1_train_near_hard_count": 179
+}

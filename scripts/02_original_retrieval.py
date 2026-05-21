@@ -167,6 +167,7 @@ def evaluate_original_retrieval(
             {
                 "qid": qid,
                 "dataset": qa.get("dataset") or dataset_name,
+                "source_split": qa.get("source_split", ""),
                 "question": question,
                 "question_type": qa.get("question_type", ""),
                 "gold_doc_id": gold_doc_id,
