@@ -34,31 +34,24 @@ The `llm` action can use an external OpenAI-compatible LLM. By default it falls 
 
 ## Pipeline
 
-python scripts/01_build_dataset.py
-python scripts/02_run_original_retrieval.py
-python scripts/03_build_hard_cases.py
-python scripts/04_generate_rewrites.py
-python scripts/05_evaluate_rewrites.py
-python scripts/06_reward_selection.py
-python scripts/07_build_analysis_tables.py
-python scripts/09_sweep_hybrid_alpha.py
-python scripts/10_evaluate_rewrite_policies.py
-python scripts/11_build_report_artifacts.py
-python scripts/12_build_results_dashboard.py
-
+```bash
 NLP/bin/python scripts/01_build_dataset.py
 NLP/bin/python scripts/02_original_retrieval.py
 NLP/bin/python scripts/03_extract_hard_cases.py
 NLP/bin/python scripts/04_annotation_prepare.py
 NLP/bin/python scripts/05_annotation_assist.py
-NLP/bin/python scripts/06_annotation_finalize.py
-NLP/bin/python scripts/07_generate_rewrites.py
+NLP/bin/python scripts/06_annotation_finalize.py --input data/outputs/hard_cases/hard_subset_850.jsonl
+NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final.jsonl --output data/outputs/rewrites/hard_subset_850_rewrites.jsonl
 NLP/bin/python scripts/08_rewrite_retrieval_eval.py
 NLP/bin/python scripts/09_reward_selection.py
 NLP/bin/python scripts/10_analysis_tables.py
+NLP/bin/python scripts/11_sentence_dense_retrieval.py
 NLP/bin/python scripts/12_hybrid_alpha_sweep.py
 NLP/bin/python scripts/13_rewrite_policy_eval.py
 NLP/bin/python scripts/14_report_builder.py
+NLP/bin/python scripts/15_rebuild_korquad2_real_chunks.py
+NLP/bin/python scripts/16_diagnose_korquad2_chunks.py
+```
 
 
 `scripts/01_build_dataset.py` builds `data/processed/corpus.jsonl` and
@@ -80,7 +73,7 @@ Optional real LLM rewrite generation:
 ```powershell
 $env:OPENAI_API_KEY="..."
 $env:OPENAI_MODEL="..."
-NLP/bin/python scripts/07_generate_rewrites.py --use-external-llm
+NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final.jsonl --output data/outputs/rewrites/hard_subset_850_rewrites.jsonl
 ```
 
 Generated LLM rewrites are cached at `data/outputs/llm_rewrite_cache.jsonl` to avoid repeated API calls.
@@ -95,8 +88,9 @@ NLP/bin/python scripts/11_sentence_dense_retrieval.py
 
 - `data/outputs/original_results.csv`: Initial retrieval metrics with Recall@K, MRR, and Answer F1.
 - `data/outputs/hard_cases.jsonl`: Original-query hard retrieval cases.
-- `data/outputs/annotation/hard_subset_300_annotation.csv`: Manual annotation sheet for sampled hard cases.
-- `data/outputs/rewrite_candidates.jsonl`: Rewrite candidates for each hard case.
+- `data/outputs/hard_cases/hard_subset_850.jsonl`: Current sampled hard and near-hard subset.
+- `data/outputs/annotation/hard_subset_850_annotation_final.csv`: Auto-finalized annotation sheet for sampled hard cases.
+- `data/outputs/rewrites/hard_subset_850_rewrites.jsonl`: Rewrite candidates for each hard case.
 - `data/outputs/rewrite_results.jsonl`: Full reward table for every `(question, retriever, action)`.
 - `data/outputs/hard_case_recovery.csv`: Reward-selected recovery rate.
 - `data/outputs/main_results.csv`: Strategy-level aggregate results.
@@ -108,7 +102,6 @@ NLP/bin/python scripts/11_sentence_dense_retrieval.py
 - `data/outputs/hybrid_alpha_sweep.csv`: Hybrid BM25/dense weight sweep.
 - `results/qualitative_examples.csv`: Report-ready recovery and non-recovery examples.
 - `results/failure_type_manual_check.csv`: 100-example failure label review sheet.
-- `docs/results_dashboard.html`: One-page visual dashboard for the current experiment outputs.
 - `docs/results_summary.md`: Compact text summary of the current experiment outputs.
 
 Report-facing CSVs are mirrored under `results/`.

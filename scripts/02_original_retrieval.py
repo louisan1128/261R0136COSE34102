@@ -1,3 +1,5 @@
+import argparse
+import hashlib
 import json
 import os
 import sys
@@ -31,17 +33,29 @@ DATASET_SPECS = [
         "qa_path": "data/processed/korquad2_filtered_qa_pairs.jsonl",
     },
 ]
+DATASET_CHOICES = ("korquad1", "klue_mrc", "korquad2", "all")
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Evaluate original retrieval by dataset.")
+    parser.add_argument(
+        "--dataset",
+        choices=DATASET_CHOICES,
+        default="all",
+        help="Dataset to evaluate. Use 'all' to evaluate every dataset.",
+    )
+    args = parser.parse_args()
+
     config = read_yaml(root / "configs" / "default.yaml")
     output_dir = Path("data/outputs/original_retrieval")
     ensure_dir(output_dir)
 
     top_k = 10
-    metrics_summary: dict[str, dict[str, dict[str, float | int]]] = {}
+    summary_path = output_dir / "metrics_summary.json"
+    metrics_summary = _load_metrics_summary(summary_path)
+    selected_specs = _select_dataset_specs(args.dataset)
 
-    for spec in DATASET_SPECS:
+    for spec in selected_specs:
         dataset_name = spec["name"]
         corpus_path = spec["corpus_path"]
         qa_path = spec["qa_path"]
@@ -56,11 +70,12 @@ def main() -> None:
 
         bm25 = None
         dense = None
+        force_overwrite = args.dataset != "all" or dataset_name == "korquad2"
 
         for retriever_name in ("bm25", "dense", "hybrid"):
             result_path = output_dir / f"{dataset_name}_{retriever_name}_results.jsonl"
             existing_records = read_jsonl(result_path)
-            if len(existing_records) == expected_count:
+            if not force_overwrite and len(existing_records) == expected_count:
                 metrics = _metrics_from_result_records(existing_records, missing_gold_count, skipped_count)
                 metrics_summary[dataset_name][retriever_name] = metrics
                 print(
@@ -73,11 +88,11 @@ def main() -> None:
                 bm25 = bm25 or BM25Retriever(corpus_path)
                 retriever = bm25
             elif retriever_name == "dense":
-                dense = dense or _build_dense_retriever(config, corpus_path)
+                dense = dense or _build_dense_retriever(config, corpus_path, dataset_name)
                 retriever = dense
             else:
                 bm25 = bm25 or BM25Retriever(corpus_path)
-                dense = dense or _build_dense_retriever(config, corpus_path)
+                dense = dense or _build_dense_retriever(config, corpus_path, dataset_name)
                 retriever = HybridRetriever(bm25, dense, alpha=config["hybrid"]["alpha"])
 
             result_records, metrics = evaluate_original_retrieval(
@@ -97,10 +112,25 @@ def main() -> None:
                 f"mrr={metrics['mrr']:.4f}, saved={result_path}"
             )
 
-    summary_path = output_dir / "metrics_summary.json"
     with summary_path.open("w", encoding="utf-8") as fout:
         json.dump(metrics_summary, fout, ensure_ascii=False, indent=2)
     print(f"Saved metrics summary to {summary_path}")
+
+
+def _select_dataset_specs(dataset: str) -> list[dict[str, str]]:
+    if dataset == "all":
+        return DATASET_SPECS
+    return [spec for spec in DATASET_SPECS if spec["name"] == dataset]
+
+
+def _load_metrics_summary(summary_path: Path) -> dict[str, dict[str, dict[str, float | int]]]:
+    if not summary_path.exists():
+        return {}
+    with summary_path.open("r", encoding="utf-8") as fin:
+        data = json.load(fin)
+    if not isinstance(data, dict):
+        raise ValueError(f"Metrics summary must be a JSON object: {summary_path}")
+    return data
 
 
 def evaluate_original_retrieval(
@@ -162,14 +192,25 @@ def evaluate_original_retrieval(
     return result_records, metrics
 
 
-def _build_dense_retriever(config: dict[str, Any], corpus_path: str) -> DenseRetriever:
+def _build_dense_retriever(config: dict[str, Any], corpus_path: str, dataset_name: str) -> DenseRetriever:
     return DenseRetriever(
         corpus_path,
         model_name=config["model_name"],
-        embedding_dir=config["data"]["embedding_dir"],
+        embedding_dir=str(_embedding_dir_for_corpus(config, corpus_path, dataset_name)),
         backend=config.get("dense_backend", "auto"),
         device=config.get("dense_device"),
     )
+
+
+def _embedding_dir_for_corpus(config: dict[str, Any], corpus_path: str, dataset_name: str) -> Path:
+    base_dir = Path(config["data"]["embedding_dir"]) / "original_retrieval" / dataset_name
+    return base_dir / _corpus_fingerprint(Path(corpus_path))
+
+
+def _corpus_fingerprint(corpus_path: Path) -> str:
+    stat = corpus_path.stat()
+    raw = f"{corpus_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
 
 
 def _load_corpus_doc_ids(corpus_path: str) -> set[str]:
