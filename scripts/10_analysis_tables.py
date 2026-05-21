@@ -7,6 +7,7 @@ os.chdir(root)
 sys.path.append(str(root))
 
 from src.analysis.build_tables import (
+    build_failure_label_analysis,
     build_failure_type_analysis,
     build_main_results,
     build_retriever_specific_results,
@@ -22,12 +23,16 @@ def main():
 
     build_main_results(rewrite_results, data_config["main_results_path"])
     build_failure_type_analysis(rewrite_results, data_config["failure_type_analysis_path"])
+    if data_config.get("failure_label_analysis_path"):
+        build_failure_label_analysis(rewrite_results, data_config["failure_label_analysis_path"])
     build_retriever_specific_results(rewrite_results, data_config["retriever_specific_path"])
     build_reward_ablation_results(rewrite_results, data_config["reward_ablation_path"])
 
     print("Saved analysis tables:")
     print(f" - {data_config['main_results_path']}")
     print(f" - {data_config['failure_type_analysis_path']}")
+    if data_config.get("failure_label_analysis_path"):
+        print(f" - {data_config['failure_label_analysis_path']}")
     print(f" - {data_config['retriever_specific_path']}")
     print(f" - {data_config['reward_ablation_path']}")
 

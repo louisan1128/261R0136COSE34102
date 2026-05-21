@@ -10,6 +10,21 @@ from src.utils.io import ensure_dir
 from src.utils.text import tokenize
 
 
+STRATEGY_ALIASES = {
+    "original": "original",
+    "keyword": "keyword",
+    "keyword_rewrite": "keyword",
+    "expanded": "expanded",
+    "semantic_rewrite": "expanded",
+    "prompt": "prompt",
+    "prompt_style": "prompt",
+    "structured": "structured",
+    "structured_rewrite": "structured",
+    "llm": "llm",
+    "llm_rewrite": "llm",
+}
+
+
 def evaluate_rewrites(
     hard_cases: list[dict[str, Any]],
     retrievers: dict[str, Any],
@@ -19,15 +34,18 @@ def evaluate_rewrites(
     candidate_records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     generator = RewriteCandidateGenerator()
-    candidates_by_qid = {record["qid"]: record.get("candidates", {}) for record in candidate_records or []}
+    candidates_by_qid = {record["qid"]: _candidate_queries(record) for record in candidate_records or []}
     rewrite_results = []
     for hard_case in hard_cases:
         question = hard_case["question"]
         answer = hard_case.get("answer", "")
         gold_doc_id = hard_case["gold_doc_id"]
         candidates = candidates_by_qid.get(hard_case["qid"]) or generator.generate(question)
-        recommended_strategies = select_strategies(hard_case.get("failure_type", "unlabeled"))
+        recommended_strategies = select_strategies(
+            hard_case.get("failure_label") or hard_case.get("failure_type", "unlabeled")
+        )
         rank_features = _rank_features(hard_case)
+        failed_retrievers = _failed_retrievers(hard_case)
         original_metrics_by_retriever = {
             retriever_name: _evaluate_query(retriever, question, gold_doc_id, answer, top_k)
             for retriever_name, retriever in retrievers.items()
@@ -65,7 +83,12 @@ def evaluate_rewrites(
                     "question": question,
                     "answer": answer,
                     "failure_type": hard_case.get("failure_type", "unlabeled"),
-                    "failed_retriever_count": len(hard_case.get("failed_retrievers", [])),
+                    "failure_label": hard_case.get("failure_label", ""),
+                    "secondary_failure_label": hard_case.get("secondary_failure_label", ""),
+                    "annotation_note": hard_case.get("annotation_note", ""),
+                    "annotated": hard_case.get("annotated", ""),
+                    "failed_retrievers": failed_retrievers,
+                    "failed_retriever_count": len(failed_retrievers),
                     "retriever": retriever_name,
                     "strategy": strategy,
                     "policy_recommended": strategy in recommended_strategies,
@@ -102,6 +125,32 @@ def evaluate_rewrites(
                 fout.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     return rewrite_results
+
+
+def _candidate_queries(record: dict[str, Any]) -> dict[str, str]:
+    if isinstance(record.get("candidates"), dict):
+        return {
+            STRATEGY_ALIASES.get(str(strategy), str(strategy)): str(query)
+            for strategy, query in record["candidates"].items()
+            if str(query).strip()
+        }
+
+    candidates: dict[str, str] = {}
+    for candidate in record.get("rewrite_candidates", []) or []:
+        rewrite_type = str(candidate.get("rewrite_type", "")).strip()
+        strategy = STRATEGY_ALIASES.get(rewrite_type)
+        query = str(candidate.get("query") or candidate.get("rewrite_query") or "").strip()
+        if strategy and query:
+            candidates[strategy] = query
+    return candidates
+
+
+def _failed_retrievers(hard_case: dict[str, Any]) -> list[str]:
+    failed = hard_case.get("failed_retrievers")
+    if isinstance(failed, list):
+        return [str(item) for item in failed if str(item).strip()]
+    source_retriever = str(hard_case.get("retriever", "")).strip()
+    return [source_retriever] if source_retriever else []
 
 
 def _evaluate_query(retriever, query: str, gold_doc_id: str, answer: str, top_k: int) -> dict[str, float | int | None]:
@@ -153,6 +202,11 @@ def _rank_features(hard_case: dict[str, Any]) -> dict[str, int | str]:
 
 
 def _rank_of_gold(hard_case: dict[str, Any], retriever: str) -> int | None:
+    if hard_case.get("retriever") == retriever:
+        gold_rank = hard_case.get("gold_rank")
+        if gold_rank not in (None, ""):
+            return int(gold_rank)
+
     retrieved = hard_case.get("original_retrieved_by_retriever", {}).get(retriever, [])
     gold_doc_id = hard_case.get("gold_doc_id")
     if gold_doc_id in retrieved:

@@ -53,7 +53,9 @@ def main():
             {
                 "qid": qid,
                 "failure_type": sample.get("failure_type", "unlabeled"),
-                "failed_retrievers": hard_case_by_qid.get(qid, {}).get("failed_retrievers", []),
+                "failure_label": sample.get("failure_label", ""),
+                "secondary_failure_label": sample.get("secondary_failure_label", ""),
+                "failed_retrievers": _failed_retrievers(hard_case_by_qid.get(qid, {})),
                 "best_query_by_retriever": best_query_by_retriever,
             }
         )
@@ -83,11 +85,11 @@ def _build_recovery_rows(flat_best: list[dict], hard_case_by_qid: dict[str, dict
         ("union_hard_cases", lambda record: True),
         (
             "retriever_originally_failed",
-            lambda record: record["retriever"] in hard_case_by_qid.get(record["qid"], {}).get("failed_retrievers", []),
+            lambda record: record["retriever"] in _failed_retrievers(hard_case_by_qid.get(record["qid"], {})),
         ),
         (
             "all_retrievers_originally_failed",
-            lambda record: len(hard_case_by_qid.get(record["qid"], {}).get("failed_retrievers", [])) >= 3,
+            lambda record: len(_failed_retrievers(hard_case_by_qid.get(record["qid"], {}))) >= 3,
         ),
     ]:
         totals = defaultdict(int)
@@ -113,6 +115,14 @@ def _build_recovery_rows(flat_best: list[dict], hard_case_by_qid: dict[str, dict
                 }
             )
     return rows
+
+
+def _failed_retrievers(hard_case: dict) -> list[str]:
+    failed = hard_case.get("failed_retrievers")
+    if isinstance(failed, list):
+        return [str(item) for item in failed if str(item).strip()]
+    source_retriever = str(hard_case.get("retriever", "")).strip()
+    return [source_retriever] if source_retriever else []
 
 
 if __name__ == "__main__":

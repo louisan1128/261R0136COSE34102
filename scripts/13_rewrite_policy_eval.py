@@ -45,6 +45,8 @@ def main():
             "state_key",
             "selected_strategy",
             "failure_type",
+            "failure_label",
+            "secondary_failure_label",
             "original_rank",
             "original_success",
             "originally_failed",

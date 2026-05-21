@@ -131,6 +131,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional delay between external LLM API calls.",
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing rewrite candidate files. Use this when regenerating with real LLM rewrites.",
+    )
     return parser.parse_args()
 
 
@@ -190,9 +195,9 @@ def main() -> None:
     validation = _validate_outputs(records, output_records, csv_rows)
     summary = _build_summary(output_records, validation, output_jsonl, output_csv)
 
-    _write_jsonl_no_overwrite(output_records, output_jsonl)
-    _write_csv_no_overwrite(csv_rows, output_csv)
-    _write_json_no_overwrite(summary, output_summary)
+    _write_jsonl(output_records, output_jsonl, overwrite=args.overwrite)
+    _write_csv(csv_rows, output_csv, overwrite=args.overwrite)
+    _write_json(summary, output_summary, overwrite=args.overwrite)
     if rewriter is not None:
         save_rewrite_cache(rewrite_cache, cache_path)
 
@@ -519,13 +524,13 @@ def _build_summary(
     return summary
 
 
-def _write_jsonl_no_overwrite(records: list[dict[str, Any]], path: Path) -> None:
+def _write_jsonl(records: list[dict[str, Any]], path: Path, overwrite: bool = False) -> None:
     lines = [json.dumps(record, ensure_ascii=False) for record in records]
     payload = "\n".join(lines) + "\n"
-    _write_text_no_overwrite(payload, path)
+    _write_text(payload, path, overwrite=overwrite)
 
 
-def _write_csv_no_overwrite(rows: list[dict[str, str]], path: Path) -> None:
+def _write_csv(rows: list[dict[str, str]], path: Path, overwrite: bool = False) -> None:
     fieldnames = ["qid", "dataset", "question", "failure_label", "secondary_failure_label", "rewrite_type", "query"]
     ensure_dir(path.parent)
     from io import StringIO
@@ -534,21 +539,22 @@ def _write_csv_no_overwrite(rows: list[dict[str, str]], path: Path) -> None:
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)
-    _write_text_no_overwrite(buffer.getvalue(), path)
+    _write_text(buffer.getvalue(), path, overwrite=overwrite)
 
 
-def _write_json_no_overwrite(payload: dict[str, Any], path: Path) -> None:
-    _write_text_no_overwrite(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", path)
+def _write_json(payload: dict[str, Any], path: Path, overwrite: bool = False) -> None:
+    _write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", path, overwrite=overwrite)
 
 
-def _write_text_no_overwrite(payload: str, path: Path) -> None:
+def _write_text(payload: str, path: Path, overwrite: bool = False) -> None:
     ensure_dir(path.parent)
     if path.exists():
         current = path.read_text(encoding="utf-8")
         if current == payload:
             print(f"Existing identical file kept: {path}")
             return
-        raise FileExistsError(f"Refusing to overwrite existing file: {path}")
+        if not overwrite:
+            raise FileExistsError(f"Refusing to overwrite existing file: {path}; rerun with --overwrite to replace it.")
     path.write_text(payload, encoding="utf-8")
 
 
@@ -590,17 +596,9 @@ def _wait_for_request_slot(last_request_at: float, delay_seconds: float) -> floa
 
 
 def _cache_key(question: str, failure_label: str, secondary_label: str, question_type: str) -> str:
-    return json.dumps(
-        {
-            "question": question,
-            "failure_label": failure_label,
-            "secondary_failure_label": secondary_label,
-            "question_type": question_type,
-            "version": "hard_subset_850_v2",
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+    # Cache by question text so older 300-case LLM rewrites can be reused when
+    # the same question appears in the 850-case experiment.
+    return question
 
 
 def _is_question_ending(token: str) -> bool:

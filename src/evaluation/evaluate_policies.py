@@ -15,6 +15,7 @@ FINAL_POLICY_LABELS = {
     "always_llm": "llm_rewrite",
     "reward_selected": "reward_selected_rewrite",
     "offline_q_learning": "rl_selected_rewrite",
+    "oracle_best_strategy": "oracle_best_rewrite",
 }
 
 
@@ -310,8 +311,8 @@ def _evaluate_contextual_bandit(
         for retriever in _retrievers_for_qid(records_by_key, qid):
             candidates = records_by_key[(qid, retriever)]
             available = [strategy for strategy in STRATEGIES if strategy in candidates]
-            failure_type = hard_case.get("failure_type", "unlabeled")
-            recommended = [strategy for strategy in select_strategies(failure_type) if strategy in candidates]
+            failure_signal = hard_case.get("failure_label") or hard_case.get("failure_type", "unlabeled")
+            recommended = [strategy for strategy in select_strategies(failure_signal) if strategy in candidates]
             search_space = recommended or available
             context = _state_key(hard_case, retriever)
             context_key = (retriever, context)
@@ -424,7 +425,8 @@ def _fit_strategy_values(
 
 
 def _select_failure_type_policy(candidates: dict[str, dict], hard_case: dict) -> str:
-    recommended = [strategy for strategy in select_strategies(hard_case.get("failure_type", "unlabeled")) if strategy in candidates]
+    failure_signal = hard_case.get("failure_label") or hard_case.get("failure_type", "unlabeled")
+    recommended = [strategy for strategy in select_strategies(failure_signal) if strategy in candidates]
     if not recommended:
         recommended = [strategy for strategy in STRATEGIES if strategy in candidates]
     return recommended[0]
@@ -468,9 +470,14 @@ def _policy_row(
         "state_key": state_key,
         "selected_strategy": strategy,
         "failure_type": hard_case.get("failure_type", record.get("failure_type", "unlabeled")),
+        "failure_label": hard_case.get("failure_label", record.get("failure_label", "")),
+        "secondary_failure_label": hard_case.get(
+            "secondary_failure_label",
+            record.get("secondary_failure_label", ""),
+        ),
         "original_rank": original_rank or "",
         "original_success": bool(original_rank),
-        "originally_failed": retriever in hard_case.get("failed_retrievers", []),
+        "originally_failed": retriever in _failed_retrievers(hard_case),
         "gold_rank": record.get("gold_rank", ""),
         "reward": float(record["reward"]),
         "policy_reward": _policy_reward(record),
@@ -503,6 +510,11 @@ def _policy_row(
 
 
 def _original_rank(hard_case: dict, retriever: str) -> int | None:
+    if hard_case.get("retriever") == retriever:
+        gold_rank = hard_case.get("gold_rank")
+        if gold_rank not in (None, ""):
+            return int(gold_rank)
+
     retrieved = hard_case.get("original_retrieved_by_retriever", {}).get(retriever, [])
     gold_doc_id = hard_case.get("gold_doc_id")
     if gold_doc_id in retrieved:
@@ -512,7 +524,8 @@ def _original_rank(hard_case: dict, retriever: str) -> int | None:
 
 def _state_key(hard_case: dict, retriever: str) -> str:
     failure_type = hard_case.get("failure_type", "unlabeled")
-    failed_retrievers = hard_case.get("failed_retrievers", [])
+    failure_label = hard_case.get("failure_label") or failure_type
+    failed_retrievers = _failed_retrievers(hard_case)
     question = hard_case.get("question", "")
     query_tokens = tokenize(question)
     query_length = len(query_tokens)
@@ -541,9 +554,17 @@ def _state_key(hard_case: dict, retriever: str) -> str:
     )
     long_token_feature = "has_long_token" if any(len(token) >= 7 for token in query_tokens) else "no_long_token"
     return (
-        f"{failure_type}|{length_bucket}|{rank_bucket}|failed_count_{failure_count}|"
+        f"{failure_label}|{failure_type}|{length_bucket}|{rank_bucket}|failed_count_{failure_count}|"
         f"{failed_scope}|{digit_feature}|{latin_feature}|{long_token_feature}"
     )
+
+
+def _failed_retrievers(hard_case: dict) -> list[str]:
+    failed = hard_case.get("failed_retrievers")
+    if isinstance(failed, list):
+        return [str(item) for item in failed if str(item).strip()]
+    source_retriever = str(hard_case.get("retriever", "")).strip()
+    return [source_retriever] if source_retriever else []
 
 
 def _eval_split(qid: str, train_qids: set[str], test_qids: set[str]) -> str:

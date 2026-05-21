@@ -102,9 +102,9 @@ def build_insights(rows: dict[str, list[dict]], counts: dict[str, int]) -> dict:
 
 def consistency_checks(counts: dict[str, int]) -> list[tuple[str, str]]:
     checks = []
-    expected_rewrite_rows = counts["rewrite_candidates"] * 6 * 3
+    expected_rewrite_rows = counts["rewrite_candidates"] * 5 * 3
     if counts["rewrite_results"] == expected_rewrite_rows:
-        checks.append(("OK", f"rewrite_results rows match candidates x 6 strategies x 3 retrievers ({expected_rewrite_rows})."))
+        checks.append(("OK", f"rewrite_results rows match candidates x 5 strategies x 3 retrievers ({expected_rewrite_rows})."))
     else:
         checks.append(("WARN", f"rewrite_results rows={counts['rewrite_results']}, expected={expected_rewrite_rows}."))
     if counts["sampled_hard_cases"] == counts["rewrite_candidates"]:

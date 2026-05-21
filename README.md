@@ -41,7 +41,7 @@ NLP/bin/python scripts/03_extract_hard_cases.py
 NLP/bin/python scripts/04_annotation_prepare.py
 NLP/bin/python scripts/05_annotation_assist.py
 NLP/bin/python scripts/06_annotation_finalize.py --input data/outputs/hard_cases/hard_subset_850.jsonl
-NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final.jsonl --output data/outputs/rewrites/hard_subset_850_rewrites.jsonl
+NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
 NLP/bin/python scripts/08_rewrite_retrieval_eval.py
 NLP/bin/python scripts/09_reward_selection.py
 NLP/bin/python scripts/10_analysis_tables.py
@@ -52,6 +52,11 @@ NLP/bin/python scripts/14_report_builder.py
 NLP/bin/python scripts/15_rebuild_korquad2_real_chunks.py
 NLP/bin/python scripts/16_diagnose_korquad2_chunks.py
 ```
+
+The current run uses the finalized 850-case annotation file at
+`data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl`. Rewrite
+candidates are read from
+`data/outputs/rewrite_candidates/hard_subset_850_rewrite_candidates.jsonl`.
 
 
 `scripts/01_build_dataset.py` builds `data/processed/corpus.jsonl` and
@@ -73,7 +78,7 @@ Optional real LLM rewrite generation:
 ```powershell
 $env:OPENAI_API_KEY="..."
 $env:OPENAI_MODEL="..."
-NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final.jsonl --output data/outputs/rewrites/hard_subset_850_rewrites.jsonl
+NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
 ```
 
 Generated LLM rewrites are cached at `data/outputs/llm_rewrite_cache.jsonl` to avoid repeated API calls.

@@ -6,7 +6,7 @@ project_title: "Offline Reinforcement Learning for Korean Query Rewriting in RAG
 # Use "lexical" only for fast offline smoke tests.
 model_name: intfloat/multilingual-e5-base
 dense_backend: sentence_transformers  # lexical | sentence_transformers | auto
-dense_device: mps  # mps | cpu | cuda | auto
+dense_device: cuda  # mps | cpu | cuda | auto
 
 reward:
   alpha: 1.0
@@ -25,7 +25,7 @@ offline_rl:
   gamma: 0.0  # One-step query rewriting MDP: no future reward term.
 
 llm_rewrite:
-  enabled: false
+  enabled: true
   provider: openai_compatible
   base_url: https://api.openai.com/v1
   api_key_env: OPENAI_API_KEY
@@ -37,9 +37,9 @@ llm_rewrite:
   # RPM limit 3 means one request every ~20s; 21s leaves a small buffer.
   request_delay_seconds: 21
   max_retries: 8
-  sample_size: 100
+  sample_size: 850
   sample_seed: 7
-  sample_path: data/outputs/hard_cases_random_sample.jsonl
+  sample_path: data/outputs/hard_cases/hard_subset_850.jsonl
   allow_fallback: true
   cache_path: data/outputs/llm_rewrite_cache.jsonl
 
@@ -58,14 +58,15 @@ data:
   limit:
   corpus_path: data/processed/corpus.jsonl
   qa_path: data/processed/qa_pairs.jsonl
-  hard_cases_path: data/outputs/hard_cases/hard_subset_300.jsonl
+  hard_cases_path: data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl
   original_results_path: data/outputs/original_results.csv
-  rewrite_candidates_path: data/outputs/rewrite_candidates.jsonl
+  rewrite_candidates_path: data/outputs/rewrite_candidates/hard_subset_850_rewrite_candidates.jsonl
   rewrite_results_path: data/outputs/rewrite_results.jsonl
   best_queries_path: data/outputs/best_queries.jsonl
   recovery_path: data/outputs/hard_case_recovery.csv
   main_results_path: data/outputs/main_results.csv
   failure_type_analysis_path: data/outputs/failure_type_analysis.csv
+  failure_label_analysis_path: data/outputs/failure_label_analysis.csv
   retriever_specific_path: data/outputs/retriever_specific_results.csv
   reward_ablation_path: data/outputs/reward_ablation_results.csv
   sentence_dense_results_path: data/outputs/sentence_dense_original_results.csv

@@ -11,6 +11,13 @@ FAILURE_TYPE_POLICY = {
     "colloquial_mismatch": ["prompt", "structured", "llm"],
     "abbreviation": ["expanded", "keyword"],
     "temporal_numeric": ["keyword", "structured"],
+    "lexical_mismatch": ["keyword", "expanded", "llm"],
+    "missing_key_term": ["structured", "expanded", "llm"],
+    "numeric_temporal_mismatch": ["keyword", "structured", "llm"],
+    "entity_mismatch": ["structured", "keyword", "llm"],
+    "semantic_mismatch": ["expanded", "llm", "prompt"],
+    "context_boundary_issue": ["structured", "keyword", "llm"],
+    "ambiguous": ["original", "keyword", "llm"],
     "unlabeled": ["original", "keyword", "expanded", "llm"],
 }
 

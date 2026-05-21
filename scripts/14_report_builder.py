@@ -45,7 +45,7 @@ def build_qualitative_examples(config: dict, hard_cases: list[dict], rewrite_res
 
     for hard_case in hard_cases:
         qid = hard_case["qid"]
-        for retriever in hard_case.get("failed_retrievers", []):
+        for retriever in _failed_retrievers(hard_case):
             strategy_records = records_by_key.get((qid, retriever), {})
             if not strategy_records:
                 continue
@@ -91,7 +91,7 @@ def build_qualitative_examples(config: dict, hard_cases: list[dict], rewrite_res
                 "qid": hard_case["qid"],
                 "retriever": retriever_name,
                 "failure_type": hard_case.get("failure_type", "unlabeled"),
-                "failed_retrievers": "|".join(hard_case.get("failed_retrievers", [])),
+                "failed_retrievers": "|".join(_failed_retrievers(hard_case)),
                 "original_question": hard_case["question"],
                 "answer": hard_case.get("answer", ""),
                 "selected_strategy": record["strategy"],
@@ -126,7 +126,7 @@ def build_failure_type_manual_check(hard_cases: list[dict], sample_size: int = 1
                 "suggested_manual_label": suggested_label,
                 "confidence": confidence,
                 "reason": reason,
-                "failed_retrievers": "|".join(hard_case.get("failed_retrievers", [])),
+                "failed_retrievers": "|".join(_failed_retrievers(hard_case)),
                 "query_length": len(tokenize(hard_case.get("question", ""))),
                 "keywords": extract_keywords(hard_case.get("question", "")),
                 "bm25_original_rank": _original_rank(hard_case, "bm25"),
@@ -251,7 +251,7 @@ def _round_robin_by_label(hard_cases: list[dict], sample_size: int) -> list[dict
 def _suggest_manual_label(hard_case: dict) -> tuple[str, float, str]:
     question = hard_case.get("question", "")
     tokens = tokenize(question)
-    failed = set(hard_case.get("failed_retrievers", []))
+    failed = set(_failed_retrievers(hard_case))
 
     if any(char.isdigit() for char in question):
         return "temporal_numeric", 0.9, "Question contains a date, number, or count expression."
@@ -278,11 +278,24 @@ def _rank_of_gold(retrieved: list[dict], gold_doc_id: str) -> int | None:
 
 
 def _original_rank(hard_case: dict, retriever: str) -> int | str:
+    if hard_case.get("retriever") == retriever:
+        gold_rank = hard_case.get("gold_rank")
+        if gold_rank not in (None, ""):
+            return int(gold_rank)
+
     retrieved = hard_case.get("original_retrieved_by_retriever", {}).get(retriever, [])
     gold_doc_id = hard_case.get("gold_doc_id")
     if gold_doc_id in retrieved:
         return retrieved.index(gold_doc_id) + 1
     return ">10"
+
+
+def _failed_retrievers(hard_case: dict) -> list[str]:
+    failed = hard_case.get("failed_retrievers")
+    if isinstance(failed, list):
+        return [str(item) for item in failed if str(item).strip()]
+    source_retriever = str(hard_case.get("retriever", "")).strip()
+    return [source_retriever] if source_retriever else []
 
 
 def _snippet(text: str, answer: str = "", max_chars: int = 180) -> str:
