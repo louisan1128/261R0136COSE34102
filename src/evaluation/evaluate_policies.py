@@ -3,6 +3,11 @@ import math
 from collections import defaultdict
 from typing import Callable
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from src.rewriting.policy import select_strategies
 from src.utils.text import tokenize
 
@@ -13,8 +18,12 @@ FINAL_POLICY_LABELS = {
     "original_only": "original_query",
     "failure_type_policy": "rule_based_rewrite",
     "always_llm": "llm_rewrite",
+    "label_retriever_policy": "label_retriever_policy",
+    "reward_ranker_policy": "reward_ranker_policy",
+    "recovery_ranker_policy": "recovery_ranker_policy",
+    "calibrated_recovery_policy": "rl_selected_rewrite",
     "reward_selected": "reward_selected_rewrite",
-    "offline_q_learning": "rl_selected_rewrite",
+    "offline_q_learning": "q_table_rewrite",
     "oracle_best_strategy": "oracle_best_rewrite",
 }
 
@@ -38,6 +47,10 @@ def evaluate_rewrite_policies(
     policy_rows.extend(_evaluate_ucb_bandit(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(_evaluate_thompson_sampling(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids, seed=seed))
     policy_rows.extend(_evaluate_contextual_bandit(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_label_retriever_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_reward_ranker_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_recovery_ranker_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_calibrated_recovery_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(
         _evaluate_offline_q_learning(
             records_by_key,
@@ -336,6 +349,337 @@ def _evaluate_contextual_bandit(
     return rows
 
 
+def _evaluate_label_retriever_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+) -> list[dict]:
+    """Learn a retriever- and failure-label-aware rewrite selector.
+
+    This is a contextual bandit table with deliberately simple backoff:
+    (retriever, failure_label) -> (retriever, failure_type) -> retriever.
+    It gives the policy a strong "keep original" option for dense retrieval
+    while still letting BM25/hybrid prefer LLM or keyword rewrites when the
+    training rewards support that choice.
+    """
+
+    values = defaultdict(lambda: defaultdict(float))
+    counts = defaultdict(lambda: defaultdict(int))
+
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            for context in _label_policy_contexts(hard_case, retriever):
+                for strategy, record in candidates.items():
+                    counts[context][strategy] += 1
+                    step = counts[context][strategy]
+                    reward = _policy_reward(record)
+                    values[context][strategy] += (reward - values[context][strategy]) / step
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            available = [strategy for strategy in STRATEGIES if strategy in candidates]
+            strategy = _select_from_context_tables(
+                available,
+                _label_policy_contexts(hard_case, retriever),
+                values,
+                counts,
+            )
+            rows.append(
+                _policy_row(
+                    "label_retriever_policy",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
+def _evaluate_reward_ranker_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+    l2: float = 1.0,
+) -> list[dict]:
+    """Train a small linear reward ranker and select the top predicted action."""
+
+    if np is None:
+        return _evaluate_label_retriever_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids)
+
+    feature_names = _build_reward_ranker_feature_names(records_by_key, hard_case_by_qid, train_qids)
+    x_train = []
+    y_train = []
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            for strategy, record in records_by_key[(qid, retriever)].items():
+                x_train.append(_reward_ranker_features(feature_names, hard_case, retriever, strategy, record))
+                y_train.append(_policy_reward(record))
+
+    if not x_train:
+        return []
+
+    x_matrix = np.asarray(x_train, dtype=float)
+    y_vector = np.asarray(y_train, dtype=float)
+    regularizer = l2 * np.eye(x_matrix.shape[1], dtype=float)
+    regularizer[0, 0] = 0.0
+    try:
+        weights = np.linalg.solve(x_matrix.T @ x_matrix + regularizer, x_matrix.T @ y_vector)
+    except np.linalg.LinAlgError:
+        weights = np.linalg.pinv(x_matrix.T @ x_matrix + regularizer) @ x_matrix.T @ y_vector
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            scored = []
+            for strategy, record in candidates.items():
+                features = _reward_ranker_features(feature_names, hard_case, retriever, strategy, record)
+                scored.append((float(np.dot(weights, features)), strategy))
+            strategy = max(scored)[1] if scored else ("original" if "original" in candidates else next(iter(candidates)))
+            rows.append(
+                _policy_row(
+                    "reward_ranker_policy",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
+def _evaluate_recovery_ranker_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+) -> list[dict]:
+    return _evaluate_linear_ranker_policy(
+        "recovery_ranker_policy",
+        records_by_key,
+        hard_case_by_qid,
+        qid_order,
+        train_qids,
+        test_qids,
+        target_fn=_recovery_utility,
+    )
+
+
+def _evaluate_calibrated_recovery_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+) -> list[dict]:
+    """Recovery ranker with retriever-specific thresholds against original."""
+
+    if np is None:
+        return _evaluate_label_retriever_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids)
+
+    feature_names, weights = _fit_linear_ranker(
+        records_by_key,
+        hard_case_by_qid,
+        train_qids,
+        target_fn=_recovery_utility,
+    )
+    thresholds = _tune_retriever_thresholds(
+        records_by_key,
+        hard_case_by_qid,
+        train_qids,
+        feature_names,
+        weights,
+        target_fn=_recovery_utility,
+    )
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            strategy = _select_calibrated_ranker_action(
+                candidates,
+                hard_case,
+                retriever,
+                feature_names,
+                weights,
+                thresholds.get(retriever, 0.0),
+            )
+            rows.append(
+                _policy_row(
+                    "calibrated_recovery_policy",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
+def _evaluate_linear_ranker_policy(
+    policy_name: str,
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+    target_fn: Callable[[dict], float],
+    l2: float = 1.0,
+) -> list[dict]:
+    if np is None:
+        return _evaluate_label_retriever_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids)
+
+    fit = _fit_linear_ranker(records_by_key, hard_case_by_qid, train_qids, target_fn, l2=l2)
+    if fit is None:
+        return []
+    feature_names, weights = fit
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            scored = []
+            for strategy, record in candidates.items():
+                features = _reward_ranker_features(feature_names, hard_case, retriever, strategy, record)
+                scored.append((float(np.dot(weights, features)), strategy))
+            strategy = max(scored)[1] if scored else ("original" if "original" in candidates else next(iter(candidates)))
+            rows.append(
+                _policy_row(
+                    policy_name,
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
+def _fit_linear_ranker(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+    target_fn: Callable[[dict], float],
+    l2: float = 1.0,
+) -> tuple[list[str], object] | None:
+    if np is None:
+        return None
+
+    feature_names = _build_reward_ranker_feature_names(records_by_key, hard_case_by_qid, train_qids)
+    x_train = []
+    y_train = []
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            for strategy, record in records_by_key[(qid, retriever)].items():
+                x_train.append(_reward_ranker_features(feature_names, hard_case, retriever, strategy, record))
+                y_train.append(target_fn(record))
+
+    if not x_train:
+        return None
+
+    x_matrix = np.asarray(x_train, dtype=float)
+    y_vector = np.asarray(y_train, dtype=float)
+    regularizer = l2 * np.eye(x_matrix.shape[1], dtype=float)
+    regularizer[0, 0] = 0.0
+    try:
+        weights = np.linalg.solve(x_matrix.T @ x_matrix + regularizer, x_matrix.T @ y_vector)
+    except np.linalg.LinAlgError:
+        weights = np.linalg.pinv(x_matrix.T @ x_matrix + regularizer) @ x_matrix.T @ y_vector
+    return feature_names, weights
+
+
+def _tune_retriever_thresholds(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+    feature_names: list[str],
+    weights,
+    target_fn: Callable[[dict], float],
+) -> dict[str, float]:
+    thresholds = {}
+    grid = [step / 100.0 for step in range(-30, 51)]
+    retrievers = sorted({retriever for _, retriever in records_by_key})
+    for retriever in retrievers:
+        best_threshold = 0.0
+        best_score = None
+        for threshold in grid:
+            selected = []
+            for qid in train_qids:
+                if (qid, retriever) not in records_by_key:
+                    continue
+                hard_case = hard_case_by_qid.get(qid, {})
+                candidates = records_by_key[(qid, retriever)]
+                strategy = _select_calibrated_ranker_action(
+                    candidates,
+                    hard_case,
+                    retriever,
+                    feature_names,
+                    weights,
+                    threshold,
+                )
+                selected.append(target_fn(candidates[strategy]))
+            score = _mean(selected)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_threshold = threshold
+        thresholds[retriever] = best_threshold
+    return thresholds
+
+
+def _select_calibrated_ranker_action(
+    candidates: dict[str, dict],
+    hard_case: dict,
+    retriever: str,
+    feature_names: list[str],
+    weights,
+    threshold: float,
+) -> str:
+    original = "original" if "original" in candidates else next(iter(candidates))
+    original_score = _predict_ranker_score(feature_names, weights, hard_case, retriever, original, candidates[original])
+    best_strategy = original
+    best_score = original_score
+    for strategy, record in candidates.items():
+        score = _predict_ranker_score(feature_names, weights, hard_case, retriever, strategy, record)
+        if score > best_score:
+            best_score = score
+            best_strategy = strategy
+    if best_strategy != original and best_score - original_score < threshold:
+        return original
+    return best_strategy
+
+
+def _predict_ranker_score(
+    feature_names: list[str],
+    weights,
+    hard_case: dict,
+    retriever: str,
+    strategy: str,
+    record: dict,
+) -> float:
+    features = _reward_ranker_features(feature_names, hard_case, retriever, strategy, record)
+    return float(np.dot(weights, features)) if np is not None else 0.0
+
+
 def _evaluate_offline_q_learning(
     records_by_key: dict[tuple[str, str], dict[str, dict]],
     hard_case_by_qid: dict[str, dict],
@@ -360,7 +704,7 @@ def _evaluate_offline_q_learning(
             state = _state_key(hard_case, retriever)
             candidates = records_by_key[(qid, retriever)]
             for strategy, record in candidates.items():
-                target = _policy_reward(record) + gamma * 0.0
+                target = _recovery_utility(record) + gamma * 0.0
                 q_values[(retriever, state)][strategy].append(target)
                 fallback_values[retriever][strategy].append(target)
 
@@ -390,20 +734,188 @@ def _select_q_action(
     available: list[str],
     state_values: dict[str, list[float]],
     fallback_values: dict[str, list[float]],
+    min_state_samples: int = 8,
+    state_weight: float = 0.35,
 ) -> str:
     def mean_or_missing(values: list[float]) -> float | None:
         return sum(values) / len(values) if values else None
 
     scored = []
     for strategy in available:
-        value = mean_or_missing(state_values.get(strategy, []))
-        if value is None:
-            value = mean_or_missing(fallback_values.get(strategy, []))
+        fallback = mean_or_missing(fallback_values.get(strategy, []))
+        state_samples = state_values.get(strategy, [])
+        state = mean_or_missing(state_samples)
+        if fallback is None and state is None:
+            continue
+        if state is not None and len(state_samples) >= min_state_samples and fallback is not None:
+            value = state_weight * state + (1.0 - state_weight) * fallback
+        elif state is not None and len(state_samples) >= min_state_samples:
+            value = state
+        else:
+            value = fallback if fallback is not None else state
         if value is not None:
             scored.append((value, strategy))
     if scored:
-        return max(scored)[1]
+        return max(scored, key=lambda item: (item[0], _strategy_tiebreak(item[1])))[1]
     return "original" if "original" in available else available[0]
+
+
+def _label_policy_contexts(hard_case: dict, retriever: str) -> list[tuple[str, ...]]:
+    failure_type = str(hard_case.get("failure_type", "unlabeled") or "unlabeled")
+    failure_label = str(hard_case.get("failure_label") or "").strip()
+    question_type = str(hard_case.get("question_type", "") or "").strip()
+    original_rank = _original_rank(hard_case, retriever)
+    rank_bucket = _rank_bucket(original_rank)
+    contexts = []
+    if failure_label:
+        contexts.append(("retriever_label_rank", retriever, failure_label, rank_bucket))
+        contexts.append(("retriever_label", retriever, failure_label))
+    if question_type:
+        contexts.append(("retriever_question_type", retriever, question_type))
+    contexts.extend(
+        [
+            ("retriever_type_rank", retriever, failure_type, rank_bucket),
+            ("retriever_type", retriever, failure_type),
+            ("retriever_rank", retriever, rank_bucket),
+            ("retriever", retriever),
+            ("global",),
+        ]
+    )
+    return contexts
+
+
+def _select_from_context_tables(
+    available: list[str],
+    contexts: list[tuple[str, ...]],
+    values: dict,
+    counts: dict,
+) -> str:
+    for context in contexts:
+        if any(counts[context][strategy] for strategy in available):
+            return max(available, key=lambda strategy: (values[context][strategy], _strategy_tiebreak(strategy)))
+    return "original" if "original" in available else available[0]
+
+
+def _strategy_tiebreak(strategy: str) -> int:
+    preference = {
+        "original": 5,
+        "llm": 4,
+        "keyword": 3,
+        "structured": 2,
+        "expanded": 1,
+        "prompt": 0,
+    }
+    return preference.get(strategy, -1)
+
+
+def _build_reward_ranker_feature_names(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+) -> list[str]:
+    names = {
+        "bias",
+        "original_success",
+        "original_rank_missing",
+        "original_rank_inverse",
+        "original_rank_gt_5",
+        "originally_failed",
+        "failed_retriever_count",
+        "question_len",
+        "question_len_short",
+        "question_len_long",
+        "has_digit",
+        "has_latin",
+        "rewrite_len",
+        "rewrite_len_delta",
+        "keyword_overlap",
+        "semantic_similarity",
+    }
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            for strategy, record in records_by_key[(qid, retriever)].items():
+                names.update(_categorical_feature_names(hard_case, retriever, strategy, record))
+    return ["bias", *sorted(name for name in names if name != "bias")]
+
+
+def _reward_ranker_features(
+    feature_names: list[str],
+    hard_case: dict,
+    retriever: str,
+    strategy: str,
+    record: dict,
+) -> list[float]:
+    values = defaultdict(float)
+    values["bias"] = 1.0
+
+    original_rank = _original_rank(hard_case, retriever)
+    values["original_success"] = 1.0 if original_rank else 0.0
+    values["original_rank_missing"] = 1.0 if original_rank is None else 0.0
+    values["original_rank_inverse"] = 0.0 if original_rank is None else 1.0 / original_rank
+    values["original_rank_gt_5"] = 1.0 if original_rank is not None and original_rank > 5 else 0.0
+    values["originally_failed"] = 1.0 if retriever in _failed_retrievers(hard_case) else 0.0
+    values["failed_retriever_count"] = float(len(_failed_retrievers(hard_case)))
+
+    question = str(hard_case.get("question") or record.get("question") or "")
+    question_tokens = tokenize(question)
+    question_len = len(question_tokens)
+    values["question_len"] = min(question_len, 30) / 30.0
+    values["question_len_short"] = 1.0 if question_len <= 4 else 0.0
+    values["question_len_long"] = 1.0 if question_len > 10 else 0.0
+    values["has_digit"] = 1.0 if any(char.isdigit() for char in question) else 0.0
+    values["has_latin"] = 1.0 if any(char.isascii() and char.isalpha() for char in question) else 0.0
+
+    original_len = _safe_float(record.get("original_query_length"))
+    rewrite_len = _safe_float(record.get("rewrite_query_length"))
+    values["rewrite_len"] = min(rewrite_len, 40.0) / 40.0
+    values["rewrite_len_delta"] = max(min(rewrite_len - original_len, 30.0), -30.0) / 30.0
+    values["keyword_overlap"] = _safe_float(record.get("keyword_overlap"))
+    values["semantic_similarity"] = _safe_float(record.get("semantic_similarity"))
+
+    for name in _categorical_feature_names(hard_case, retriever, strategy, record):
+        values[name] = 1.0
+
+    return [values[name] for name in feature_names]
+
+
+def _categorical_feature_names(hard_case: dict, retriever: str, strategy: str, record: dict) -> set[str]:
+    failure_type = str(hard_case.get("failure_type", record.get("failure_type", "unlabeled")) or "unlabeled")
+    failure_label = str(hard_case.get("failure_label", record.get("failure_label", "")) or "unlabeled")
+    secondary_label = str(hard_case.get("secondary_failure_label", record.get("secondary_failure_label", "")) or "none")
+    question_type = str(hard_case.get("question_type", record.get("question_type", "")) or "unknown")
+    rank_bucket = _rank_bucket(_original_rank(hard_case, retriever))
+    return {
+        f"retriever={retriever}",
+        f"strategy={strategy}",
+        f"failure_type={failure_type}",
+        f"failure_label={failure_label}",
+        f"secondary_failure_label={secondary_label}",
+        f"question_type={question_type}",
+        f"rank_bucket={rank_bucket}",
+        f"retriever_strategy={retriever}:{strategy}",
+        f"retriever_label={retriever}:{failure_label}",
+        f"label_strategy={failure_label}:{strategy}",
+        f"retriever_label_strategy={retriever}:{failure_label}:{strategy}",
+        f"retriever_rank_strategy={retriever}:{rank_bucket}:{strategy}",
+    }
+
+
+def _rank_bucket(original_rank: int | None) -> str:
+    if original_rank is None:
+        return "failed"
+    if original_rank == 1:
+        return "rank_1"
+    if original_rank <= 5:
+        return "rank_2_5"
+    return "rank_6_10"
+
+
+def _safe_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _fit_strategy_values(
@@ -442,6 +954,15 @@ def _select_oracle(candidates: dict[str, dict], hard_case: dict) -> str:
 
 def _policy_reward(record: dict) -> float:
     return float(record.get("reward_improvement", record.get("reward", 0.0)))
+
+
+def _recovery_utility(record: dict) -> float:
+    return (
+        float(record.get("recall10_improvement", 0.0))
+        + 0.25 * float(record.get("mrr_improvement", 0.0))
+        + 0.10 * float(record.get("answer_f1_improvement", 0.0))
+        + 0.05 * float(record.get("reward_improvement", 0.0))
+    )
 
 
 def _retrievers_for_qid(records_by_key: dict[tuple[str, str], dict[str, dict]], qid: str) -> list[str]:
