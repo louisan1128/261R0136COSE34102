@@ -25,12 +25,12 @@ def main():
         gamma=rl_config.get("gamma", 0.0),
     )
 
-    policy_results_path = data_config.get("policy_results_path", "data/outputs/policy_results.csv")
-    policy_summary_path = data_config.get("policy_summary_path", "data/outputs/policy_summary.csv")
-    final_comparison_path = data_config.get("final_comparison_path", "data/outputs/final_policy_comparison.csv")
+    policy_results_path = data_config.get("policy_results_path", "data/outputs/evaluation/policy_results.csv")
+    policy_summary_path = data_config.get("policy_summary_path", "data/outputs/evaluation/policy_summary.csv")
+    final_comparison_path = data_config.get("final_comparison_path", "data/outputs/evaluation/final_policy_comparison.csv")
     policy_hard_case_summary_path = data_config.get(
         "policy_summary_hard_cases_path",
-        "data/outputs/policy_summary_hard_cases.csv",
+        "data/outputs/evaluation/policy_summary_hard_cases.csv",
     )
     final_comparison_rows = build_final_policy_comparison(policy_rows, eval_split="test")
 

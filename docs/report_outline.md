@@ -33,7 +33,7 @@ Describe Korean RAG hard retrieval cases, the one-step offline RL formulation, t
   - `temporal_numeric`
   - `unlabeled`
 - Discuss limitations of heuristic labels and the need for manual annotation.
-- Use `results/failure_type_manual_check.csv` as a 100-example review sheet for partial human validation.
+- Use `reports/failure_type_manual_check.csv` as a 100-example review sheet for partial human validation.
 
 ## 4. Rewrite Candidate Generation
 
@@ -121,8 +121,8 @@ Report:
 - Reward ablation
 - Hybrid alpha sweep
 - Oracle gap analysis
-- Qualitative examples from `results/qualitative_examples.csv`
-- Failure-type manual-check summary from `results/failure_type_manual_check.csv`
+- Qualitative examples from `reports/qualitative_examples.csv`
+- Failure-type manual-check summary from `reports/failure_type_manual_check.csv`
 
 ## 10. Conclusion
 

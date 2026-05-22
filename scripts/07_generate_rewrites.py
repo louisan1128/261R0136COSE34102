@@ -211,7 +211,7 @@ def _maybe_build_rewriter(
     llm_config = dict(config.get("llm_rewrite", {}))
     api_key_env = str(llm_config.get("api_key_env", "OPENAI_API_KEY"))
     has_api_key = bool(os.environ.get(api_key_env, "").strip())
-    cache_path = str(llm_config.get("cache_path", "data/outputs/llm_rewrite_cache.jsonl"))
+    cache_path = str(llm_config.get("cache_path", "data/outputs/cache/llm_rewrite_cache.jsonl"))
     if args.no_external_llm or not has_api_key:
         return None, {}, cache_path, 0.0
 

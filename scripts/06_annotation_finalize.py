@@ -17,8 +17,7 @@ from src.utils.io import ensure_dir, read_jsonl, write_jsonl
 DEFAULT_INPUT_PATH = Path("data/outputs/hard_cases/hard_subset_1000.jsonl")
 OUTPUT_DIR = Path("data/outputs/annotation")
 PREVIOUS_ANNOTATION_PATHS = [
-    OUTPUT_DIR / "hard_subset_850_annotation_final_v2.jsonl",
-    OUTPUT_DIR / "hard_subset_850_annotation_final.jsonl",
+    OUTPUT_DIR / "hard_subset_1000_annotation_final.jsonl",
 ]
 
 FAILURE_TYPE_TO_LABEL = {

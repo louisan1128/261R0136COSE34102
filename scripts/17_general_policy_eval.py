@@ -29,15 +29,15 @@ from src.utils.io import ensure_dir, read_jsonl, read_yaml
 from src.utils.text import tokenize
 
 
-DEFAULT_OUTPUT = Path("data/outputs/general_policy_eval.csv")
-DEFAULT_SUMMARY = Path("data/outputs/general_policy_summary.csv")
+DEFAULT_OUTPUT = Path("data/outputs/general_policy/general_policy_eval.csv")
+DEFAULT_SUMMARY = Path("data/outputs/general_policy/general_policy_summary.csv")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate rewrite policies on the general QA set.")
     parser.add_argument("--qa-path", default=None, help="QA JSONL path. Defaults to configs/default.yaml data.qa_path.")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Per-query policy output CSV path.")
-    parser.add_argument("--summary", default=str(DEFAULT_SUMMARY), help="Policy summary CSV path.")
+    parser.add_argument("--output", default=None, help="Per-query policy output CSV path.")
+    parser.add_argument("--summary", default=None, help="Policy summary CSV path.")
     parser.add_argument("--limit", type=int, default=None, help="Optional limit for smoke tests.")
     parser.add_argument("--sample-size", type=int, default=None, help="Optional deterministic sample size.")
     parser.add_argument("--seed", type=int, default=7, help="Deterministic sampling seed when --limit is used.")
@@ -59,6 +59,8 @@ def main() -> None:
         config["dense_backend"] = args.dense_backend
     data_config = config["data"]
     top_k = int(config.get("top_k", 10))
+    output_path = Path(args.output or data_config.get("general_policy_eval_path", str(DEFAULT_OUTPUT)))
+    summary_path = Path(args.summary or data_config.get("general_policy_summary_path", str(DEFAULT_SUMMARY)))
 
     qa_path = Path(args.qa_path or data_config["qa_path"])
     qa_records = read_jsonl(qa_path)
@@ -111,10 +113,10 @@ def main() -> None:
     rows.extend(_build_gated_policy_rows(rows))
 
     summary_rows = _summarize(rows)
-    _write_csv(rows, Path(args.output))
-    _write_csv(summary_rows, Path(args.summary))
-    print(f"Saved general policy eval rows to {args.output}")
-    print(f"Saved general policy summary to {args.summary}")
+    _write_csv(rows, output_path)
+    _write_csv(summary_rows, summary_path)
+    print(f"Saved general policy eval rows to {output_path}")
+    print(f"Saved general policy summary to {summary_path}")
 
 
 def _fit_general_policy(

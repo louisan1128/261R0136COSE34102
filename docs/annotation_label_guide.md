@@ -1,6 +1,6 @@
 # Annotation Label Guide
 
-Use `data/outputs/annotation/hard_subset_300_annotation.csv` for manual review.
+Use `data/outputs/annotation/hard_subset_1000_annotation.csv` for manual review.
 Leave `failure_label` empty until a human annotator chooses one label. Use
 `secondary_failure_label` only when a second cause is clearly relevant.
 

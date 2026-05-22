@@ -1,10 +1,20 @@
 {
   "sampling_seed": 42,
   "source_retriever": "hybrid",
-  "base_subset": "data\\outputs\\annotation\\hard_subset_850_annotation_final_v2.jsonl",
-  "base_count": 850,
-  "added_korquad1_train_count": 150,
   "total_sampled": 1000,
-  "korquad1_train_strict_hard_count": 87,
-  "korquad1_train_near_hard_count": 179
+  "dataset_counts": {
+    "klue_mrc": 350,
+    "korquad1": 200,
+    "korquad2": 450
+  },
+  "hardness_level_counts": {
+    "strict_hard": 937,
+    "near_hard": 63
+  },
+  "source_split_counts": {
+    "korquad1/dev_or_unspecified": 50,
+    "korquad1/train": 150,
+    "klue_mrc/dev_or_unspecified": 350,
+    "korquad2/dev_or_unspecified": 450
+  }
 }

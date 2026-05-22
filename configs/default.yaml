@@ -41,7 +41,7 @@ llm_rewrite:
   sample_seed: 7
   sample_path: data/outputs/hard_cases/hard_subset_1000.jsonl
   allow_fallback: true
-  cache_path: data/outputs/llm_rewrite_cache.jsonl
+  cache_path: data/outputs/cache/llm_rewrite_cache.jsonl
 
 data:
   raw_path: data/raw/KorQuAD_v1.0_dev.json
@@ -62,20 +62,22 @@ data:
   corpus_path: data/processed/corpus.jsonl
   qa_path: data/processed/qa_pairs.jsonl
   hard_cases_path: data/outputs/annotation/hard_subset_1000_annotation_final.jsonl
-  original_results_path: data/outputs/original_results.csv
+  original_results_path: data/outputs/retrieval_baselines/original_results.csv
   rewrite_candidates_path: data/outputs/rewrite_candidates/hard_subset_1000_rewrite_candidates.jsonl
-  rewrite_results_path: data/outputs/rewrite_results.jsonl
-  best_queries_path: data/outputs/best_queries.jsonl
-  recovery_path: data/outputs/hard_case_recovery.csv
-  main_results_path: data/outputs/main_results.csv
-  failure_type_analysis_path: data/outputs/failure_type_analysis.csv
-  failure_label_analysis_path: data/outputs/failure_label_analysis.csv
-  retriever_specific_path: data/outputs/retriever_specific_results.csv
-  reward_ablation_path: data/outputs/reward_ablation_results.csv
-  sentence_dense_results_path: data/outputs/sentence_dense_original_results.csv
-  hybrid_alpha_sweep_path: data/outputs/hybrid_alpha_sweep.csv
-  policy_results_path: data/outputs/policy_results.csv
-  policy_summary_path: data/outputs/policy_summary.csv
-  policy_summary_hard_cases_path: data/outputs/policy_summary_hard_cases.csv
-  final_comparison_path: data/outputs/final_policy_comparison.csv
+  rewrite_results_path: data/outputs/evaluation/rewrite_results.jsonl
+  best_queries_path: data/outputs/evaluation/best_queries.jsonl
+  recovery_path: data/outputs/evaluation/hard_case_recovery.csv
+  main_results_path: data/outputs/evaluation/main_results.csv
+  failure_type_analysis_path: data/outputs/evaluation/failure_type_analysis.csv
+  failure_label_analysis_path: data/outputs/evaluation/failure_label_analysis.csv
+  retriever_specific_path: data/outputs/evaluation/retriever_specific_results.csv
+  reward_ablation_path: data/outputs/evaluation/reward_ablation_results.csv
+  sentence_dense_results_path: data/outputs/retrieval_baselines/sentence_dense_original_results.csv
+  hybrid_alpha_sweep_path: data/outputs/retrieval_baselines/hybrid_alpha_sweep.csv
+  policy_results_path: data/outputs/evaluation/policy_results.csv
+  policy_summary_path: data/outputs/evaluation/policy_summary.csv
+  policy_summary_hard_cases_path: data/outputs/evaluation/policy_summary_hard_cases.csv
+  final_comparison_path: data/outputs/evaluation/final_policy_comparison.csv
+  general_policy_eval_path: data/outputs/general_policy/general_policy_eval.csv
+  general_policy_summary_path: data/outputs/general_policy/general_policy_summary.csv
   embedding_dir: embeddings

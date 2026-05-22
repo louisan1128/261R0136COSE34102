@@ -1,36 +1,50 @@
 # KorQR-RL
 
-**KorQR-RL: Offline Reinforcement Learning for Korean Query Rewriting in RAG**
+**Offline Reinforcement Learning for Korean Query Rewriting in RAG**
 
-KorQR-RL treats Korean query rewriting as a one-step offline reinforcement learning problem for RAG retrieval. Given an original question and retrieval-state features, a policy selects one rewrite action and receives reward from BM25, dense, and hybrid retrieval results.
+KorQR-RL treats Korean query rewriting as a one-step offline RL problem for
+retrieval-augmented generation. Given an original question and retrieval-state
+features, a policy selects one rewrite action and receives reward from BM25,
+dense, and hybrid retrieval results.
 
-The default run now uses the real `sentence-transformers` dense backend (`intfloat/multilingual-e5-base`). For fast smoke tests, set `dense_backend: lexical` in `configs/default.yaml`.
+The current experiment uses the real `sentence-transformers` dense backend with
+`intfloat/multilingual-e5-base`. For quick smoke runs, set
+`dense_backend: lexical` in `configs/default.yaml`.
 
-## Research Questions
+## Current Snapshot
 
-1. Which Korean QA queries become hard retrieval cases?
-2. Which rewrite actions recover failed retrieval cases?
-3. Does the best action depend on retriever state and failure type?
-4. Can adaptive offline policies outperform fixed rewrite rules?
-5. How much room remains between learned policies and oracle action selection?
+- Processed QA set: 22,484 questions across KorQuAD 1.0, KLUE-MRC, and filtered KorQuAD 2.0.
+- Current hard-case subset: 1,000 questions.
+- Hard-case mix: 350 KLUE-MRC, 200 KorQuAD 1.0, 450 KorQuAD 2.0.
+- Final annotation file: 1,000 rows; 948 rows currently have a primary failure label.
+- Rewrite reward table: 15,000 rows = 1,000 questions x 5 strategies x 3 retrievers.
+- Hard-case policy evaluation: 54,900 rows over 1,000 hard cases.
+- Latest general policy evaluation: 5,000 sampled QA questions, 75,000 rows.
 
-## Offline RL Formulation
-
-| RL component | Project definition |
-|---|---|
-| State `s` | Query length, failure type, original rank buckets, retriever-rank gaps, failed retriever count, keyword overlap, semantic similarity |
-| Action `a` | `original`, `keyword`, `expanded`, `prompt`, `structured`, `llm` |
-| Reward `r` | `Recall@10 + MRR + Answer F1 - semantic drift penalty - length penalty` |
-| Transition | Terminal after one rewrite action |
-| Policies | Fixed rules, random, epsilon-greedy, UCB, Thompson sampling, contextual bandit, offline Q-learning |
-
-Because query rewriting is modeled as a one-step MDP, the offline Q-learning target is:
+## Directory Layout
 
 ```text
-Q(s, a) = E[r | s, a]
+configs/
+  default.yaml                         Main experiment paths and parameters.
+data/
+  raw/                                 Local raw datasets.
+  processed/                           Built corpora and QA JSONL files.
+  outputs/
+    original_retrieval/                Per-dataset original retrieval logs.
+    retrieval_baselines/               Original, dense-only, and hybrid-alpha summaries.
+    hard_cases/                        Extracted hard cases and 1,000-case subset.
+    annotation/                        Annotation sheets and finalized labels.
+    rewrite_candidates/                Generated rewrite candidates.
+    evaluation/                        Hard-case reward, policy, and analysis tables.
+    general_policy/                    General QA policy evaluation outputs.
+    cache/                             LLM rewrite cache.
+docs/                                  Report notes and generated markdown previews.
+reports/                               Generated report-ready CSV exports.
+scripts/                               Main pipeline entry points.
+scripts/reporting/                     Optional reporting and review utilities.
+scripts/korquad2_debug/                KorQuAD2 chunk diagnosis/rebuild utilities.
+src/                                   Reusable preprocessing, retrieval, rewrite, and evaluation code.
 ```
-
-The `llm` action can use an external OpenAI-compatible LLM. By default it falls back to a deterministic LLM-style proxy so the pipeline remains reproducible without API access.
 
 ## Pipeline
 
@@ -38,8 +52,6 @@ The `llm` action can use an external OpenAI-compatible LLM. By default it falls 
 NLP/bin/python scripts/01_build_dataset.py
 NLP/bin/python scripts/02_original_retrieval.py
 NLP/bin/python scripts/03_extract_hard_cases.py
-NLP/bin/python scripts/04_annotation_prepare.py
-NLP/bin/python scripts/05_annotation_assist.py
 NLP/bin/python scripts/06_annotation_finalize.py --input data/outputs/hard_cases/hard_subset_1000.jsonl
 NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_1000_annotation_final.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
 NLP/bin/python scripts/08_rewrite_retrieval_eval.py
@@ -48,33 +60,14 @@ NLP/bin/python scripts/10_analysis_tables.py
 NLP/bin/python scripts/11_sentence_dense_retrieval.py
 NLP/bin/python scripts/12_hybrid_alpha_sweep.py
 NLP/bin/python scripts/13_rewrite_policy_eval.py
-NLP/bin/python scripts/14_report_builder.py
-NLP/bin/python scripts/15_rebuild_korquad2_real_chunks.py
-NLP/bin/python scripts/16_diagnose_korquad2_chunks.py
+NLP/bin/python scripts/17_general_policy_eval.py --sample-size 5000 --output data/outputs/general_policy/general_policy_eval_5000.csv --summary data/outputs/general_policy/general_policy_summary_5000.csv
 ```
 
-The current run uses the finalized 1000-case annotation file at
-`data/outputs/annotation/hard_subset_1000_annotation_final.jsonl`. Rewrite
-candidates are read from
-`data/outputs/rewrite_candidates/hard_subset_1000_rewrite_candidates.jsonl`.
+Optional report assets:
 
-The 1000-case hard subset keeps the previous 850 cases and adds 150 KorQuAD 1.0
-train hard cases selected from a sampled 5000-question train subset.
-
-
-`scripts/01_build_dataset.py` builds `data/processed/corpus.jsonl` and
-`data/processed/qa_pairs.jsonl` from the datasets listed in `configs/default.yaml`.
-By default it prepares KorQuAD 1.0, KLUE-MRC, and KorQuAD 2.0 filtered QA data.
-It also writes dataset-specific files such as `korquad1_qa_pairs.jsonl`,
-`klue_mrc_qa_pairs.jsonl`, and `korquad2_filtered_qa_pairs.jsonl`.
-KorQuAD 2.0 is filtered toward question types missing or rare in KorQuAD 1.0
-and KLUE-MRC.
-For KorQuAD 2.0, place QA pairs at `data/raw/qa_pairs_2(1).jsonl` and chunk
-corpus at `data/raw/korquad2_chunks.jsonl` with `chunk_id`, `doc_id`, and `text`.
-If the chunk corpus is missing, the builder can create
-`data/raw/korquad2_chunks.jsonl` from the local `data/processed/qa_pairs_2.jsonl`;
-those synthetic chunks use title and answer text because the original context is
-not present in that local file.
+```bash
+NLP/bin/python scripts/reporting/report_builder.py
+```
 
 Optional real LLM rewrite generation:
 
@@ -84,77 +77,97 @@ $env:OPENAI_MODEL="..."
 NLP/bin/python scripts/07_generate_rewrites.py --input data/outputs/annotation/hard_subset_1000_annotation_final.jsonl --output-dir data/outputs/rewrite_candidates --overwrite
 ```
 
-Generated LLM rewrites are cached at `data/outputs/llm_rewrite_cache.jsonl` to avoid repeated API calls.
+Generated LLM rewrites are cached at
+`data/outputs/cache/llm_rewrite_cache.jsonl`.
 
-Optional dense-only baseline:
+## Key Outputs
 
-```bash
-NLP/bin/python scripts/11_sentence_dense_retrieval.py
-```
+- `data/outputs/hard_cases/hard_subset_1000.jsonl`: Current 1,000-case hard subset.
+- `data/outputs/annotation/hard_subset_1000_annotation_final.jsonl`: Final labels for the hard subset.
+- `data/outputs/rewrite_candidates/hard_subset_1000_rewrite_candidates.jsonl`: Rewrite candidates.
+- `data/outputs/evaluation/rewrite_results.jsonl`: Per-action retrieval and reward table.
+- `data/outputs/evaluation/main_results.csv`: Strategy-level hard-case metrics.
+- `data/outputs/evaluation/policy_results.csv`: Per-query policy decisions.
+- `data/outputs/evaluation/policy_summary.csv`: Policy comparison summary.
+- `data/outputs/evaluation/final_policy_comparison.csv`: Held-out hard-case policy comparison.
+- `data/outputs/general_policy/general_policy_eval_5000.csv`: Latest 5,000-question general policy evaluation.
+- `data/outputs/general_policy/general_policy_summary_5000.csv`: Summary of the 5,000-question evaluation.
+- `data/outputs/retrieval_baselines/hybrid_alpha_sweep.csv`: Hybrid BM25/dense weight sweep.
 
-## Outputs
+## Retrieval Baselines
 
-- `data/outputs/original_results.csv`: Initial retrieval metrics with Recall@K, MRR, and Answer F1.
-- `data/outputs/hard_cases.jsonl`: Original-query hard retrieval cases.
-- `data/outputs/hard_cases/hard_subset_1000.jsonl`: Current sampled hard and near-hard subset.
-- `data/outputs/annotation/hard_subset_1000_annotation_final.csv`: Auto-finalized annotation sheet for sampled hard cases.
-- `data/outputs/rewrite_candidates/hard_subset_1000_rewrite_candidates.jsonl`: Rewrite candidates for each hard case.
-- `data/outputs/rewrite_results.jsonl`: Full reward table for every `(question, retriever, action)`.
-- `data/outputs/hard_case_recovery.csv`: Reward-selected recovery rate.
-- `data/outputs/main_results.csv`: Strategy-level aggregate results.
-- `data/outputs/failure_type_analysis.csv`: Failure-type-level analysis.
-- `data/outputs/reward_ablation_results.csv`: Reward ablation.
-- `data/outputs/policy_results.csv`: Per-query policy decisions and state features.
-- `data/outputs/policy_summary.csv`: Policy comparison.
-- `data/outputs/final_policy_comparison.csv`: Final held-out comparison of original, rule-based, LLM, reward-selected, and RL-selected rewrites.
-- `data/outputs/hybrid_alpha_sweep.csv`: Hybrid BM25/dense weight sweep.
-- `results/qualitative_examples.csv`: Report-ready recovery and non-recovery examples.
-- `results/failure_type_manual_check.csv`: 100-example failure label review sheet.
-- `docs/results_summary.md`: Compact text summary of the current experiment outputs.
-
-Report-facing CSVs are mirrored under `results/`.
-
-## Current Sentence-Transformers Run
-
-KorQuAD dev: 5,774 QA pairs and 961 passages.
-
-| retriever | original Recall@10 | original MRR | original Answer F1 |
-|---|---:|---:|---:|
-| BM25 | 0.9790 | 0.9072 | 0.9846 |
-| dense sentence-transformers | 0.9707 | 0.8472 | 0.9803 |
-| hybrid alpha=0.5 | 0.9863 | 0.9183 | 0.9905 |
-
-The real dense run yields 265 union hard cases. The reward table contains 4,770 `(question, retriever, action)` records.
-
-Reward-selected hard-case recovery:
-
-| subset | BM25 | dense sentence-transformers | hybrid |
-|---|---:|---:|---:|
-| retriever originally failed | 0.1653 | 0.3018 | 0.3418 |
-| all retrievers originally failed | 0.1818 | 0.3182 | 0.2727 |
-
-Held-out `offline_rl_test` summary for `offline_q_learning`:
+Original retrieval summary on the KorQuAD 1.0 dev baseline:
 
 | retriever | Recall@10 | MRR | Answer F1 |
 |---|---:|---:|---:|
-| BM25 | 0.5750 | 0.3781 | 0.7260 |
-| dense sentence-transformers | 0.4875 | 0.2881 | 0.6884 |
-| hybrid | 0.7375 | 0.4340 | 0.8258 |
+| BM25 | 0.9790 | 0.9072 | 0.9846 |
+| dense | 0.9707 | 0.8472 | 0.9803 |
+| hybrid alpha=0.5 | 0.9863 | 0.9183 | 0.9905 |
 
-Hybrid alpha sweep found the strongest original-query setting at `alpha=0.1` with Recall@10 `0.9868` and MRR `0.9285`.
+Across the multi-dataset original retrieval logs, hybrid retrieval is strongest
+on all three datasets:
 
-## Current Interpretation
+| dataset | best retriever | Recall@10 | MRR |
+|---|---|---:|---:|
+| KorQuAD 1.0 | hybrid | 0.9792 | 0.9038 |
+| KLUE-MRC | hybrid | 0.9389 | 0.8361 |
+| KorQuAD 2.0 filtered | hybrid | 0.8003 | 0.6513 |
 
-- Rewriting is not universally beneficial; BM25 often performs best with original or conservative rewrites.
-- Real dense retrieval is much stronger than the lexical fallback, so the hard-case set is smaller and more meaningful.
-- Hybrid retrieval is strongest overall, but the best BM25/dense weight is closer to dense-heavy fusion (`alpha=0.1`) than the default `0.5`.
-- Oracle performance is still meaningfully above learned policies, so better state features and learned contextual models are promising.
+The best hybrid alpha by original-query MRR is `0.1` with Recall@10 `0.9868`
+and MRR `0.9285`.
 
-## 보완할 점
+## Hard-Case Results
 
-- Run the final policy/reward table with actual LLM-generated rewrites.
-- Complete human review of the generated 100-example failure-type check sheet.
-- Add KLUE-MRC or another Korean QA/RAG dataset for generalization.
-- Add confidence intervals and paired significance tests.
-- Train a stronger contextual policy such as LinUCB, FQI, or a small neural Q-scorer.
-- Generate final figures automatically for policy comparison, reward ablation, failure-type recovery, and hybrid alpha sweep.
+Best mean hard-case reward by retriever in `main_results.csv`:
+
+| retriever | best strategy | Recall@10 | MRR | Answer F1 | Reward |
+|---|---|---:|---:|---:|---:|
+| BM25 | llm | 0.2080 | 0.0878 | 0.4679 | 0.4066 |
+| dense | original | 0.0690 | 0.0311 | 0.0847 | 0.1225 |
+| hybrid | llm | 0.0920 | 0.0363 | 0.3995 | 0.2307 |
+
+Held-out hard-case policy comparison, 300 test rows per retriever:
+
+| retriever | policy | Recall@10 | MRR | Answer F1 | Reward |
+|---|---|---:|---:|---:|---:|
+| BM25 | original_only | 0.1400 | 0.0630 | 0.3951 | 0.3665 |
+| BM25 | offline_q_learning | 0.1933 | 0.0748 | 0.4413 | 0.3716 |
+| BM25 | reward_selected | 0.2300 | 0.1077 | 0.5230 | 0.5274 |
+| dense | original_only | 0.0767 | 0.0315 | 0.0777 | 0.1287 |
+| dense | offline_q_learning | 0.0767 | 0.0335 | 0.0778 | 0.1220 |
+| dense | reward_selected | 0.1067 | 0.0450 | 0.1257 | 0.1830 |
+| hybrid | original_only | 0.0367 | 0.0061 | 0.3475 | 0.2109 |
+| hybrid | offline_q_learning | 0.0767 | 0.0339 | 0.3623 | 0.1953 |
+| hybrid | reward_selected | 0.1600 | 0.0636 | 0.4690 | 0.4096 |
+
+`reward_selected` is an oracle-style upper bound from the logged action table.
+The learned policies improve some retrieval metrics on hard cases, but they do
+not yet reliably improve reward across retrievers.
+
+## General Policy Evaluation
+
+Latest 5,000-question evaluation, test split only:
+
+| retriever | policy | Recall@10 | MRR | Answer F1 | Reward | Rewrite rate |
+|---|---|---:|---:|---:|---:|---:|
+| BM25 | original_only | 0.8753 | 0.7725 | 0.8621 | 1.6885 | 0.0000 |
+| BM25 | score_gated_rl | 0.8760 | 0.7728 | 0.8624 | 1.6894 | 0.0047 |
+| BM25 | oracle_gated_rl | 0.8833 | 0.7740 | 0.8715 | 1.6830 | 0.1247 |
+| dense | original_only | 0.6167 | 0.5082 | 0.0458 | 0.8896 | 0.0000 |
+| dense | score_gated_rl | 0.6167 | 0.5082 | 0.0458 | 0.8896 | 0.0000 |
+| dense | oracle_gated_rl | 0.6267 | 0.5106 | 0.0457 | 0.8389 | 0.3833 |
+| hybrid | original_only | 0.8647 | 0.6404 | 0.8413 | 1.6014 | 0.0000 |
+| hybrid | score_gated_rl | 0.8647 | 0.6404 | 0.8413 | 1.6014 | 0.0000 |
+| hybrid | oracle_gated_rl | 0.8847 | 0.6446 | 0.8516 | 1.6056 | 0.1353 |
+
+On the broader 5,000-question sample, unconditional rewriting hurts reward.
+The score-gated policy is intentionally conservative and mostly preserves the
+original query, while oracle gating shows remaining headroom.
+
+## Interpretation
+
+- Rewriting is useful mainly for selected hard cases, not as a default action.
+- Hybrid retrieval remains the strongest original-query retriever.
+- LLM-style rewrites are the best average hard-case strategy for BM25 and hybrid, but not for dense retrieval.
+- The current learned policies still lag the oracle/reward-selected upper bound.
+- Better state features and a stronger contextual policy are the clearest next steps.

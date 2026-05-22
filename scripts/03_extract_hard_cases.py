@@ -17,7 +17,7 @@ from src.utils.io import ensure_dir, read_jsonl, write_jsonl
 INPUT_DIR = Path("data/outputs/original_retrieval")
 OUTPUT_DIR = Path("data/outputs/hard_cases")
 RANDOM_SEED = 42
-BASE_SUBSET_PATH = Path("data/outputs/annotation/hard_subset_850_annotation_final_v2.jsonl")
+BASE_SUBSET_PATH = None
 KORQUAD1_TRAIN_ADD_SIZE = 150
 
 DATASET_SPECS = {
@@ -43,7 +43,7 @@ SOURCE_RETRIEVER = "hybrid"
 
 def main() -> None:
     ensure_dir(OUTPUT_DIR)
-    if BASE_SUBSET_PATH.exists():
+    if BASE_SUBSET_PATH is not None and BASE_SUBSET_PATH.exists():
         _extend_base_subset_with_korquad1_train()
         return
 
@@ -115,13 +115,15 @@ def main() -> None:
             "total_sampled": len(hard_subset),
             "datasets": summary_rows,
         },
-        OUTPUT_DIR / "hard_case_summary.json",
+        OUTPUT_DIR / "hard_case_summary_1000.json",
     )
 
     print(f"Saved final hard subset with {len(hard_subset)} records to {OUTPUT_DIR / 'hard_subset_1000.jsonl'}")
 
 
 def _extend_base_subset_with_korquad1_train() -> None:
+    if BASE_SUBSET_PATH is None:
+        raise RuntimeError("BASE_SUBSET_PATH is not configured.")
     rng = random.Random(RANDOM_SEED)
     base_records = read_jsonl(BASE_SUBSET_PATH)
     base_qids = {str(record.get("qid", "")) for record in base_records}
