@@ -603,8 +603,8 @@ def _wait_for_request_slot(last_request_at: float, delay_seconds: float) -> floa
 
 
 def _cache_key(question: str, failure_label: str, secondary_label: str, question_type: str) -> str:
-    # Cache by question text so older 300-case LLM rewrites can be reused when
-    # the same question appears in a larger hard-subset experiment.
+    # Cache by question text so earlier LLM rewrites can be reused when
+    # the hard-case subset is expanded or regenerated.
     return question
 
 

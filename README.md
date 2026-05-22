@@ -104,6 +104,13 @@ Original retrieval summary on the KorQuAD 1.0 dev baseline:
 | dense | 0.9707 | 0.8472 | 0.9803 |
 | hybrid alpha=0.5 | 0.9863 | 0.9183 | 0.9905 |
 
+The table above is the dev-only KorQuAD 1.0 baseline from
+`data/outputs/retrieval_baselines/original_results.csv`. The next table uses
+the multi-dataset original retrieval logs in
+`data/outputs/original_retrieval/metrics_summary.json`; its KorQuAD 1.0 row has
+10,774 questions because it includes the expanded KorQuAD 1.0 split used for the
+hard-case pipeline.
+
 Across the multi-dataset original retrieval logs, hybrid retrieval is strongest
 on all three datasets:
 
@@ -126,7 +133,9 @@ Best mean hard-case reward by retriever in `main_results.csv`:
 | dense | original | 0.0690 | 0.0311 | 0.0847 | 0.1225 |
 | hybrid | llm | 0.0920 | 0.0363 | 0.3995 | 0.2307 |
 
-Held-out hard-case policy comparison, 300 test rows per retriever:
+The hard subset contains 1,000 questions. The policy split uses 700 train
+questions and 300 held-out test questions; the table below reports those 300
+test questions for each retriever.
 
 | retriever | policy | Recall@10 | MRR | Answer F1 | Reward |
 |---|---|---:|---:|---:|---:|
@@ -148,17 +157,25 @@ not yet reliably improve reward across retrievers.
 
 Latest 5,000-question evaluation, test split only:
 
-| retriever | policy | Recall@10 | MRR | Answer F1 | Reward | Rewrite rate |
-|---|---|---:|---:|---:|---:|---:|
-| BM25 | original_only | 0.8753 | 0.7725 | 0.8621 | 1.6885 | 0.0000 |
-| BM25 | score_gated_rl | 0.8760 | 0.7728 | 0.8624 | 1.6894 | 0.0047 |
-| BM25 | oracle_gated_rl | 0.8833 | 0.7740 | 0.8715 | 1.6830 | 0.1247 |
-| dense | original_only | 0.6167 | 0.5082 | 0.0458 | 0.8896 | 0.0000 |
-| dense | score_gated_rl | 0.6167 | 0.5082 | 0.0458 | 0.8896 | 0.0000 |
-| dense | oracle_gated_rl | 0.6267 | 0.5106 | 0.0457 | 0.8389 | 0.3833 |
-| hybrid | original_only | 0.8647 | 0.6404 | 0.8413 | 1.6014 | 0.0000 |
-| hybrid | score_gated_rl | 0.8647 | 0.6404 | 0.8413 | 1.6014 | 0.0000 |
-| hybrid | oracle_gated_rl | 0.8847 | 0.6446 | 0.8516 | 1.6056 | 0.1353 |
+| retriever | policy | Recall@10 | MRR | Rewrite rate |
+|---|---|---:|---:|---:|
+| BM25 | original_only | 0.8753 | 0.7725 | 0.0000 |
+| BM25 | score_gated_rl | 0.8760 | 0.7728 | 0.0047 |
+| BM25 | oracle_gated_rl | 0.8833 | 0.7740 | 0.1247 |
+| dense | original_only | 0.6167 | 0.5082 | 0.0000 |
+| dense | score_gated_rl | 0.6167 | 0.5082 | 0.0000 |
+| dense | oracle_gated_rl | 0.6267 | 0.5106 | 0.3833 |
+| hybrid | original_only | 0.8647 | 0.6404 | 0.0000 |
+| hybrid | score_gated_rl | 0.8647 | 0.6404 | 0.0000 |
+| hybrid | oracle_gated_rl | 0.8847 | 0.6446 | 0.1353 |
+
+Dense and hybrid Answer F1/reward values from the previous general-policy CSVs
+are intentionally omitted here. They were generated before the dense embedding
+cache was made corpus-aware, so a stale FAISS/doc-id cache could pair the right
+retrieved id with the wrong passage text. That affects Answer F1 and reward, but
+the code now guards against this by fingerprinting the corpus in
+`src/retrievers/dense.py`. Re-run `scripts/17_general_policy_eval.py` after
+rebuilding dense embeddings to refresh those columns.
 
 On the broader 5,000-question sample, unconditional rewriting hurts reward.
 The score-gated policy is intentionally conservative and mostly preserves the
@@ -167,7 +184,9 @@ original query, while oracle gating shows remaining headroom.
 ## Interpretation
 
 - Rewriting is useful mainly for selected hard cases, not as a default action.
-- Hybrid retrieval remains the strongest original-query retriever.
+- Hybrid retrieval remains the strongest original-query retriever on broad
+  original-query evaluation, while the hard-case subset is intentionally biased
+  toward questions where hybrid retrieval was weak.
 - LLM-style rewrites are the best average hard-case strategy for BM25 and hybrid, but not for dense retrieval.
 - The current learned policies still lag the oracle/reward-selected upper bound.
 - Better state features and a stronger contextual policy are the clearest next steps.

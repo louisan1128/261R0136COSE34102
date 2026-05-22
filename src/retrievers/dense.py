@@ -95,10 +95,19 @@ class DenseRetriever(BaseRetriever):
         return SentenceTransformer, None
 
     def _cache_key(self) -> str:
-        raw_key = f"{self.backend}:{self.model_name}:{self.corpus_path}"
+        raw_key = f"{self.backend}:{self.model_name}:{self.corpus_path}:{self._corpus_fingerprint()}"
         digest = hashlib.md5(raw_key.encode("utf-8")).hexdigest()[:12]
         model_slug = "".join(char if char.isalnum() else "_" for char in self.model_name.lower())
         return f"dense_{model_slug}_{digest}"
+
+    def _corpus_fingerprint(self) -> str:
+        path = Path(self.corpus_path)
+        digest = hashlib.sha256()
+        digest.update(str(path.resolve()).encode("utf-8"))
+        with path.open("rb") as fin:
+            for chunk in iter(lambda: fin.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()[:16]
 
     def _load_corpus(self) -> list[dict]:
         path = Path(self.corpus_path)
@@ -136,8 +145,9 @@ class DenseRetriever(BaseRetriever):
             try:
                 self.index = faiss.read_index(str(self.index_path))
                 self.doc_embeddings = np.load(self.embedding_path)
-                self.doc_ids = np.load(self.doc_ids_path, allow_pickle=True).tolist()
-                return
+                cached_doc_ids = np.load(self.doc_ids_path, allow_pickle=True).tolist()
+                if cached_doc_ids == self.doc_ids and len(self.doc_embeddings) == len(self.doc_texts):
+                    return
             except Exception:
                 pass
         self._build_index()
