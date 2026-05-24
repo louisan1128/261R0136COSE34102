@@ -21,13 +21,13 @@ STRATEGY_ALIASES = {
     "keyword_rewrite": "keyword",
     "expanded": "expanded",
     "semantic_rewrite": "expanded",
-    "prompt": "prompt",
-    "prompt_style": "prompt",
     "structured": "structured",
     "structured_rewrite": "structured",
     "llm": "llm",
     "llm_rewrite": "llm",
 }
+
+EVALUATED_STRATEGIES = {"original", "keyword", "expanded", "structured", "llm"}
 
 
 def evaluate_rewrites(
@@ -106,6 +106,16 @@ def evaluate_rewrites(
                     **rank_features,
                     "gold_rank": metrics["gold_rank"] or "",
                     "original_gold_rank": original_metrics["gold_rank"] or "",
+                    "top1_score": metrics["top1_score"],
+                    "top2_score": metrics["top2_score"],
+                    "score_gap_top1_top2": metrics["score_gap_top1_top2"],
+                    "score_ratio_top1_top2": metrics["score_ratio_top1_top2"],
+                    "top10_doc_ids": metrics["top10_doc_ids"],
+                    "original_top1_score": original_metrics["top1_score"],
+                    "original_top2_score": original_metrics["top2_score"],
+                    "original_score_gap_top1_top2": original_metrics["score_gap_top1_top2"],
+                    "original_score_ratio_top1_top2": original_metrics["score_ratio_top1_top2"],
+                    "original_top10_doc_ids": original_metrics["top10_doc_ids"],
                     "rank_improvement": _rank_improvement(original_metrics["gold_rank"], metrics["gold_rank"], top_k),
                     "original_recall@10": original_metrics["recall@10"],
                     "original_mrr": original_metrics["mrr"],
@@ -139,6 +149,7 @@ def _candidate_queries(record: dict[str, Any]) -> dict[str, str]:
             STRATEGY_ALIASES.get(str(strategy), str(strategy)): str(query)
             for strategy, query in record["candidates"].items()
             if str(query).strip()
+            and STRATEGY_ALIASES.get(str(strategy), str(strategy)) in EVALUATED_STRATEGIES
         }
 
     candidates: dict[str, str] = {}
@@ -146,7 +157,7 @@ def _candidate_queries(record: dict[str, Any]) -> dict[str, str]:
         rewrite_type = str(candidate.get("rewrite_type", "")).strip()
         strategy = STRATEGY_ALIASES.get(rewrite_type)
         query = str(candidate.get("query") or candidate.get("rewrite_query") or "").strip()
-        if strategy and query:
+        if strategy in EVALUATED_STRATEGIES and query:
             candidates[strategy] = query
     return candidates
 
@@ -161,6 +172,8 @@ def _failed_retrievers(hard_case: dict[str, Any]) -> list[str]:
 
 def _evaluate_query(retriever, query: str, gold_doc_id: str, answer: str, top_k: int) -> dict[str, float | int | None]:
     retrieved = retriever.retrieve(query, top_k=top_k)
+    top1_score = _score_at(retrieved, 0)
+    top2_score = _score_at(retrieved, 1)
     return {
         "gold_rank": _gold_rank(retrieved, gold_doc_id),
         "recall@1": recall_at_k(retrieved, gold_doc_id, 1),
@@ -168,7 +181,21 @@ def _evaluate_query(retriever, query: str, gold_doc_id: str, answer: str, top_k:
         "recall@10": recall_at_k(retrieved, gold_doc_id, 10),
         "mrr": mrr(retrieved, gold_doc_id),
         "answer_f1": answer_f1(retrieved, answer, k=top_k),
+        "top1_score": top1_score,
+        "top2_score": top2_score,
+        "score_gap_top1_top2": top1_score - top2_score,
+        "score_ratio_top1_top2": top1_score / top2_score if top2_score else 0.0,
+        "top10_doc_ids": [str(item.get("doc_id", "")) for item in retrieved[:top_k]],
     }
+
+
+def _score_at(retrieved: list[dict], index: int) -> float:
+    if index >= len(retrieved):
+        return 0.0
+    try:
+        return float(retrieved[index].get("score", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _gold_rank(retrieved: list[dict], gold_doc_id: str) -> int | None:

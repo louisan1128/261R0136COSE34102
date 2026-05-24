@@ -17,8 +17,9 @@ The current experiment uses the real `sentence-transformers` dense backend with
 - Current hard-case subset: 1,000 questions.
 - Hard-case mix: 350 KLUE-MRC, 200 KorQuAD 1.0, 450 KorQuAD 2.0.
 - Final annotation file: 1,000 rows; 948 rows currently have a primary failure label.
-- Rewrite reward table: 15,000 rows = 1,000 questions x 5 strategies x 3 retrievers.
-- Hard-case policy evaluation: 54,900 rows over 1,000 hard cases.
+- Final rewrite action space: `original`, `keyword`, `expanded`, `structured`, `llm`.
+- Rewrite reward table: 15,000 rows = 1,000 questions x 5 actions x 3 retrievers.
+- Hard-case policy evaluation is produced from the logged reward table without rerunning retrieval.
 - Latest general policy evaluation: 5,000 sampled QA questions, 75,000 rows.
 
 ## Directory Layout
@@ -60,6 +61,7 @@ NLP/bin/python scripts/10_analysis_tables.py
 NLP/bin/python scripts/11_sentence_dense_retrieval.py
 NLP/bin/python scripts/12_hybrid_alpha_sweep.py
 NLP/bin/python scripts/13_rewrite_policy_eval.py
+NLP/bin/python scripts/14_report_diagnostics.py
 NLP/bin/python scripts/17_general_policy_eval.py --sample-size 5000 --output data/outputs/general_policy/general_policy_eval_5000.csv --summary data/outputs/general_policy/general_policy_summary_5000.csv
 ```
 
@@ -68,6 +70,10 @@ Optional report assets:
 ```bash
 NLP/bin/python scripts/reporting/report_builder.py
 ```
+
+`scripts/14_report_diagnostics.py` builds report-facing checks for action
+distribution, rewrite harm, oracle gap, annotation quality, LLM/cache status,
+encoding diagnostics, and multi-seed hard-case policy stability.
 
 Optional real LLM rewrite generation:
 
@@ -90,6 +96,7 @@ Generated LLM rewrites are cached at
 - `data/outputs/evaluation/policy_results.csv`: Per-query policy decisions.
 - `data/outputs/evaluation/policy_summary.csv`: Policy comparison summary.
 - `data/outputs/evaluation/final_policy_comparison.csv`: Held-out hard-case policy comparison.
+- `data/outputs/evaluation/report_diagnostics/`: Report diagnostics and multi-seed summaries.
 - `data/outputs/general_policy/general_policy_eval_5000.csv`: Latest 5,000-question general policy evaluation.
 - `data/outputs/general_policy/general_policy_summary_5000.csv`: Summary of the 5,000-question evaluation.
 - `data/outputs/retrieval_baselines/hybrid_alpha_sweep.csv`: Hybrid BM25/dense weight sweep.
@@ -130,8 +137,8 @@ Best mean hard-case reward by retriever in `main_results.csv`:
 | retriever | best strategy | Recall@10 | MRR | Answer F1 | Reward |
 |---|---|---:|---:|---:|---:|
 | BM25 | llm | 0.2080 | 0.0878 | 0.4679 | 0.4066 |
-| dense | original | 0.0690 | 0.0311 | 0.0847 | 0.1225 |
-| hybrid | llm | 0.0920 | 0.0363 | 0.3995 | 0.2307 |
+| dense | original | 0.2320 | 0.0978 | 0.4603 | 0.5066 |
+| hybrid | llm | 0.1840 | 0.0718 | 0.4549 | 0.3681 |
 
 The hard subset contains 1,000 questions. The policy split uses 700 train
 questions and 300 held-out test questions; the table below reports those 300
@@ -140,18 +147,18 @@ test questions for each retriever.
 | retriever | policy | Recall@10 | MRR | Answer F1 | Reward |
 |---|---|---:|---:|---:|---:|
 | BM25 | original_only | 0.1400 | 0.0630 | 0.3951 | 0.3665 |
-| BM25 | offline_q_learning | 0.1933 | 0.0748 | 0.4413 | 0.3716 |
+| BM25 | refined_label_rule_model_policy | 0.2133 | 0.0838 | 0.4479 | 0.4067 |
 | BM25 | reward_selected | 0.2300 | 0.1077 | 0.5230 | 0.5274 |
-| dense | original_only | 0.0767 | 0.0315 | 0.0777 | 0.1287 |
-| dense | offline_q_learning | 0.0767 | 0.0335 | 0.0778 | 0.1220 |
-| dense | reward_selected | 0.1067 | 0.0450 | 0.1257 | 0.1830 |
-| hybrid | original_only | 0.0367 | 0.0061 | 0.3475 | 0.2109 |
-| hybrid | offline_q_learning | 0.0767 | 0.0339 | 0.3623 | 0.1953 |
-| hybrid | reward_selected | 0.1600 | 0.0636 | 0.4690 | 0.4096 |
+| dense | original_only | 0.2433 | 0.1040 | 0.4555 | 0.5206 |
+| dense | refined_label_rule_model_policy | 0.2700 | 0.1105 | 0.4420 | 0.4922 |
+| dense | reward_selected | 0.3033 | 0.1473 | 0.5360 | 0.6311 |
+| hybrid | original_only | 0.1467 | 0.0356 | 0.4385 | 0.3812 |
+| hybrid | refined_label_rule_model_policy | 0.2400 | 0.0694 | 0.4573 | 0.4504 |
+| hybrid | reward_selected | 0.3133 | 0.1262 | 0.5647 | 0.6338 |
 
 `reward_selected` is an oracle-style upper bound from the logged action table.
-The learned policies improve some retrieval metrics on hard cases, but they do
-not yet reliably improve reward across retrievers.
+The best learned policy currently improves BM25 and hybrid hard-case test
+performance while leaving a meaningful gap to oracle action selection.
 
 ## General Policy Evaluation
 
@@ -189,4 +196,4 @@ original query, while oracle gating shows remaining headroom.
   toward questions where hybrid retrieval was weak.
 - LLM-style rewrites are the best average hard-case strategy for BM25 and hybrid, but not for dense retrieval.
 - The current learned policies still lag the oracle/reward-selected upper bound.
-- Better state features and a stronger contextual policy are the clearest next steps.
+- Report diagnostics should be regenerated with `scripts/14_report_diagnostics.py` before writing final tables.

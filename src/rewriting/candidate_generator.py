@@ -1,4 +1,4 @@
-from src.utils.text import expanded_query, extract_keywords, llm_style_query, prompt_style_query, structured_query
+from src.utils.text import expanded_query, extract_keywords, llm_style_query, structured_query
 
 
 class RewriteCandidateGenerator:
@@ -9,7 +9,6 @@ class RewriteCandidateGenerator:
             return {
                 "original": "",
                 "keyword": "",
-                "prompt": "",
                 "expanded": "",
                 "structured": "",
                 "llm": "",
@@ -17,7 +16,6 @@ class RewriteCandidateGenerator:
 
         original = question.strip()
         keyword = extract_keywords(original)
-        prompt = prompt_style_query(original)
         expanded = expanded_query(original)
         structured = structured_query(original)
         llm = llm_query.strip() if llm_query and llm_query.strip() else llm_style_query(original)
@@ -25,7 +23,6 @@ class RewriteCandidateGenerator:
         return {
             "original": original,
             "keyword": keyword,
-            "prompt": prompt,
             "expanded": expanded,
             "structured": structured,
             "llm": llm,

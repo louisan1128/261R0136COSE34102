@@ -1,0 +1,50 @@
+{
+  "llm_config_enabled": true,
+  "llm_config_provider": "openai_compatible",
+  "llm_model_configured": "",
+  "api_key_env_name": "OPENAI_API_KEY",
+  "api_key_present_in_environment": false,
+  "allow_fallback": true,
+  "cache_path": "data\\outputs\\cache\\llm_rewrite_cache.jsonl",
+  "cache_rows": 1232,
+  "candidate_path": "data\\outputs\\rewrite_candidates\\hard_subset_1000_rewrite_candidates.jsonl",
+  "candidate_questions": 1000,
+  "rewrite_type_distribution": {
+    "keyword_rewrite": 1000,
+    "llm_rewrite": 1000,
+    "original": 1000,
+    "semantic_rewrite": 1000,
+    "structured_rewrite": 1000
+  },
+  "generation_summary": {
+    "total_questions": 1000,
+    "total_rewrite_candidates": 5000,
+    "rewrite_type_distribution": {
+      "original": 1000,
+      "keyword_rewrite": 1000,
+      "semantic_rewrite": 1000,
+      "structured_rewrite": 1000,
+      "llm_rewrite": 1000
+    },
+    "failure_label_distribution": {
+      "missing_key_term": 275,
+      "numeric_temporal_mismatch": 218,
+      "ambiguous": 59,
+      "entity_mismatch": 98,
+      "lexical_mismatch": 310,
+      "context_boundary_issue": 39,
+      "semantic_mismatch": 1
+    },
+    "dataset_distribution": {
+      "klue_mrc": 350,
+      "korquad1": 200,
+      "korquad2": 450
+    },
+    "empty_query_count": 0,
+    "invalid_candidate_count": 0,
+    "answer_leakage_count": 0,
+    "output_jsonl": "data\\outputs\\rewrite_candidates\\hard_subset_1000_rewrite_candidates.jsonl",
+    "output_csv": "data\\outputs\\rewrite_candidates\\hard_subset_1000_rewrite_candidates.csv"
+  },
+  "interpretation": "If cache_rows is zero or no API key/model was configured when script 07 ran, llm_rewrite should be reported as LLM-style fallback rather than verified external LLM output."
+}

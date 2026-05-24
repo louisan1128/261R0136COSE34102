@@ -136,7 +136,7 @@ def extract_keywords(text: str, max_keywords: int = 8) -> str:
     return " ".join(ranked[:max_keywords])
 
 
-def prompt_style_query(question: str) -> str:
+def _legacy_search_intent_query(question: str) -> str:
     question = question.strip()
     if not question:
         return ""

@@ -1,0 +1,14 @@
+count,label,num_records,rate,scope
+310,lexical_mismatch,1000,0.31,primary_failure_label
+275,missing_key_term,1000,0.275,primary_failure_label
+218,numeric_temporal_mismatch,1000,0.218,primary_failure_label
+98,entity_mismatch,1000,0.098,primary_failure_label
+52,,1000,0.052,primary_failure_label
+39,context_boundary_issue,1000,0.039,primary_failure_label
+7,ambiguous,1000,0.007,primary_failure_label
+1,semantic_mismatch,1000,0.001,primary_failure_label
+854,,1000,0.854,secondary_failure_label
+94,entity_mismatch,1000,0.094,secondary_failure_label
+27,numeric_temporal_mismatch,1000,0.027,secondary_failure_label
+16,context_boundary_issue,1000,0.016,secondary_failure_label
+9,missing_key_term,1000,0.009,secondary_failure_label

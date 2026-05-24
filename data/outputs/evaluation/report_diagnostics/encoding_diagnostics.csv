@@ -1,0 +1,7 @@
+hangul_char_count,hangul_share_of_non_ascii,line_count,lines_with_replacement_char,non_ascii_char_count,path,size_bytes,unicode_replacement_char_count
+8936574,0.9853807817660691,22484,0,9069158,data\processed\qa_pairs.jsonl,37286503,0
+6174369,0.982365727508606,16273,0,6285204,data\processed\corpus.jsonl,24457722,0
+1058347,0.9760053339923974,1000,0,1084366,data\outputs\annotation\hard_subset_1000_annotation_final.jsonl,4834867,0
+167429,0.9848764705882352,1000,0,170000,data\outputs\rewrite_candidates\hard_subset_1000_rewrite_candidates.jsonl,1070608,0
+911811,0.9838377625999417,15000,0,926790,data\outputs\evaluation\rewrite_results.jsonl,33740367,0
+2623381,0.999897089971189,75016,0,2623651,data\outputs\general_policy\general_policy_eval_5000.csv,19701739,0

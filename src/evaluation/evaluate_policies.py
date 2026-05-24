@@ -1,5 +1,6 @@
 import random
 import math
+import re
 from collections import defaultdict
 from typing import Callable
 
@@ -12,7 +13,7 @@ from src.rewriting.policy import select_strategies
 from src.utils.text import tokenize
 
 
-STRATEGIES = ["original", "keyword", "expanded", "prompt", "structured", "llm"]
+STRATEGIES = ["original", "keyword", "expanded", "structured", "llm"]
 
 FINAL_POLICY_LABELS = {
     "original_only": "original_query",
@@ -22,6 +23,10 @@ FINAL_POLICY_LABELS = {
     "reward_ranker_policy": "reward_ranker_policy",
     "recovery_ranker_policy": "recovery_ranker_policy",
     "calibrated_recovery_policy": "rl_selected_rewrite",
+    "state_recovery_bandit_policy": "state_recovery_contextual_bandit",
+    "retriever_tuned_bandit_policy": "retriever_tuned_contextual_bandit",
+    "conservative_linucb_policy": "conservative_contextual_bandit",
+    "refined_label_rule_model_policy": "refined_label_rule_model_policy",
     "reward_selected": "reward_selected_rewrite",
     "offline_q_learning": "q_table_rewrite",
     "oracle_best_strategy": "oracle_best_rewrite",
@@ -31,12 +36,17 @@ FINAL_POLICY_LABELS = {
 def evaluate_rewrite_policies(
     rewrite_results: list[dict],
     hard_cases: list[dict],
+    original_contexts: dict[str, dict[str, list[str]]] | None = None,
     seed: int = 7,
     train_ratio: float = 0.7,
     gamma: float = 0.0,
 ) -> tuple[list[dict], list[dict]]:
     records_by_key = _index_rewrite_results(rewrite_results)
     hard_case_by_qid = {record["qid"]: record for record in hard_cases}
+    hard_case_by_qid = _augment_hard_cases_with_rewrite_contexts(hard_case_by_qid, records_by_key)
+    if original_contexts:
+        hard_case_by_qid = _augment_hard_cases_with_original_contexts(hard_case_by_qid, original_contexts)
+    hard_case_by_qid = _augment_hard_cases_with_refined_labels(hard_case_by_qid)
     qid_order = _stable_qid_order(rewrite_results)
     train_qids, test_qids = _split_qids(qid_order, train_ratio, seed)
 
@@ -51,6 +61,10 @@ def evaluate_rewrite_policies(
     policy_rows.extend(_evaluate_reward_ranker_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(_evaluate_recovery_ranker_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(_evaluate_calibrated_recovery_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_state_recovery_bandit_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_retriever_tuned_bandit_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_conservative_linucb_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_refined_label_rule_model_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(
         _evaluate_offline_q_learning(
             records_by_key,
@@ -93,6 +107,59 @@ def _split_qids(qid_order: list[str], train_ratio: float, seed: int) -> tuple[se
     return set(shuffled_qids[:split_idx]), set(shuffled_qids[split_idx:])
 
 
+def _augment_hard_cases_with_original_contexts(
+    hard_case_by_qid: dict[str, dict],
+    original_contexts: dict[str, dict[str, list[str]]],
+) -> dict[str, dict]:
+    augmented = {}
+    for qid, hard_case in hard_case_by_qid.items():
+        copied = dict(hard_case)
+        copied["original_context_by_retriever"] = {
+            retriever: top10
+            for retriever, top10 in original_contexts.get(qid, {}).items()
+        }
+        augmented[qid] = copied
+    return augmented
+
+
+def _augment_hard_cases_with_rewrite_contexts(
+    hard_case_by_qid: dict[str, dict],
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+) -> dict[str, dict]:
+    augmented = {qid: dict(hard_case) for qid, hard_case in hard_case_by_qid.items()}
+    for (qid, retriever), candidates in records_by_key.items():
+        if qid not in augmented:
+            continue
+        original = candidates.get("original")
+        if not original:
+            continue
+        augmented[qid].setdefault("original_top1_score_by_retriever", {})[retriever] = _safe_float(
+            original.get("original_top1_score", original.get("top1_score"))
+        )
+        augmented[qid].setdefault("original_score_gap_by_retriever", {})[retriever] = _safe_float(
+            original.get("original_score_gap_top1_top2", original.get("score_gap_top1_top2"))
+        )
+        augmented[qid].setdefault("original_score_ratio_by_retriever", {})[retriever] = _safe_float(
+            original.get("original_score_ratio_top1_top2", original.get("score_ratio_top1_top2"))
+        )
+        top10 = original.get("original_top10_doc_ids") or original.get("top10_doc_ids")
+        if isinstance(top10, list):
+            augmented[qid].setdefault("original_scored_top10_by_retriever", {})[retriever] = [
+                str(doc_id) for doc_id in top10
+            ]
+    return augmented
+
+
+def _augment_hard_cases_with_refined_labels(hard_case_by_qid: dict[str, dict]) -> dict[str, dict]:
+    augmented = {}
+    for qid, hard_case in hard_case_by_qid.items():
+        copied = dict(hard_case)
+        copied["refined_failure_label"] = _refined_failure_label(copied)
+        copied["label_rule_group"] = _label_rule_group(copied)
+        augmented[qid] = copied
+    return augmented
+
+
 def _evaluate_static_policies(
     records_by_key: dict[tuple[str, str], dict[str, dict]],
     hard_case_by_qid: dict[str, dict],
@@ -104,7 +171,6 @@ def _evaluate_static_policies(
         "original_only": lambda candidates, hard_case: "original",
         "always_keyword": lambda candidates, hard_case: "keyword",
         "always_expanded": lambda candidates, hard_case: "expanded",
-        "always_prompt": lambda candidates, hard_case: "prompt",
         "always_structured": lambda candidates, hard_case: "structured",
         "always_llm": lambda candidates, hard_case: "llm",
         "failure_type_policy": _select_failure_type_policy,
@@ -533,6 +599,229 @@ def _evaluate_calibrated_recovery_policy(
     return rows
 
 
+def _evaluate_state_recovery_bandit_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+) -> list[dict]:
+    """State-aware contextual bandit tuned for hard-case recovery.
+
+    This deliberately keeps the policy low-variance: it learns mean recovery
+    utility per (retriever, state_key, action), then backs off to retriever and
+    global action values when the exact state is sparse. In this dataset that
+    outperforms heavier regressors because hard-case labels are informative
+    and the split is small.
+    """
+
+    values = defaultdict(lambda: defaultdict(float))
+    counts = defaultdict(lambda: defaultdict(int))
+
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            for context in _state_recovery_contexts(hard_case, retriever):
+                for strategy, record in candidates.items():
+                    counts[context][strategy] += 1
+                    step = counts[context][strategy]
+                    reward = _recovery_utility(record)
+                    values[context][strategy] += (reward - values[context][strategy]) / step
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            available = [strategy for strategy in STRATEGIES if strategy in candidates]
+            strategy = _select_from_context_tables(
+                available,
+                _state_recovery_contexts(hard_case, retriever),
+                values,
+                counts,
+            )
+            rows.append(
+                _policy_row(
+                    "state_recovery_bandit_policy",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
+def _evaluate_retriever_tuned_bandit_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+) -> list[dict]:
+    """Retriever-specific contextual bandit.
+
+    BM25, dense, and hybrid respond to different rewrite risks, so this policy
+    uses a small retriever-specific objective/context choice while still
+    estimating all action values from the training split only.
+    """
+
+    configs = {
+        "bm25": (_state_recovery_contexts, lambda record: float(record.get("mrr_improvement", 0.0))),
+        "dense": (_label_policy_contexts, _policy_reward),
+        "hybrid": (_label_state_recovery_contexts, _recovery_utility),
+    }
+    values = defaultdict(lambda: defaultdict(float))
+    counts = defaultdict(lambda: defaultdict(int))
+
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            context_fn, target_fn = configs.get(retriever, (_state_recovery_contexts, _recovery_utility))
+            candidates = records_by_key[(qid, retriever)]
+            for context in context_fn(hard_case, retriever):
+                for strategy, record in candidates.items():
+                    counts[context][strategy] += 1
+                    step = counts[context][strategy]
+                    reward = target_fn(record)
+                    values[context][strategy] += (reward - values[context][strategy]) / step
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            context_fn, _ = configs.get(retriever, (_state_recovery_contexts, _recovery_utility))
+            candidates = records_by_key[(qid, retriever)]
+            available = [strategy for strategy in STRATEGIES if strategy in candidates]
+            strategy = _select_from_context_tables(
+                available,
+                context_fn(hard_case, retriever),
+                values,
+                counts,
+            )
+            rows.append(
+                _policy_row(
+                    "retriever_tuned_bandit_policy",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
+def _evaluate_conservative_linucb_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+    alpha: float = 0.15,
+) -> list[dict]:
+    """Conservative contextual bandit for selective query rewriting.
+
+    Each rewrite action gets a ridge reward model conditioned on query and
+    retrieval uncertainty features. At selection time, non-original actions
+    must clear the original action by a tuned margin after subtracting a small
+    uncertainty penalty. This keeps the RL framing but matches the one-step
+    nature of selective query rewriting better than multi-step Q-learning.
+    """
+
+    if np is None:
+        return _evaluate_label_retriever_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids)
+
+    fit = _fit_linucb_models(records_by_key, hard_case_by_qid, train_qids, target_fn=_recovery_utility)
+    if fit is None:
+        return []
+    feature_names, models = fit
+    thresholds = _tune_linucb_thresholds(
+        records_by_key,
+        hard_case_by_qid,
+        train_qids,
+        feature_names,
+        models,
+        alpha=alpha,
+        target_fn=_recovery_utility,
+    )
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            strategy = _select_conservative_linucb_action(
+                candidates,
+                hard_case,
+                retriever,
+                feature_names,
+                models,
+                thresholds.get(retriever, 0.0),
+                alpha=alpha,
+            )
+            rows.append(
+                _policy_row(
+                    "conservative_linucb_policy",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
+def _evaluate_refined_label_rule_model_policy(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+) -> list[dict]:
+    """Safely blend refined-label action rules with a learned base policy.
+
+    Manual failure labels are useful but noisy. This policy first maps them to a
+    more stable label group, uses the retriever-tuned contextual bandit as a
+    learned base policy, and only overrides that base when the train split shows
+    a clear action advantage for the same (retriever, refined label group,
+    original-rank bucket). This gives label-specific rules without letting noisy
+    labels rewrite everything.
+    """
+
+    label_values, label_counts = _fit_refined_label_action_tables(records_by_key, hard_case_by_qid, train_qids)
+    base_values, base_counts = _fit_retriever_tuned_action_tables(records_by_key, hard_case_by_qid, train_qids)
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            strategy = _select_refined_label_rule_model_action(
+                candidates,
+                hard_case,
+                retriever,
+                label_values,
+                label_counts,
+                base_values,
+                base_counts,
+            )
+            rows.append(
+                _policy_row(
+                    "refined_label_rule_model_policy",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                )
+            )
+    return rows
+
+
 def _evaluate_linear_ranker_policy(
     policy_name: str,
     records_by_key: dict[tuple[str, str], dict[str, dict]],
@@ -668,6 +957,252 @@ def _select_calibrated_ranker_action(
     return best_strategy
 
 
+def _fit_linucb_models(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+    target_fn: Callable[[dict], float],
+    l2: float = 1.0,
+) -> tuple[list[str], dict[tuple[str, str], dict[str, object]]] | None:
+    if np is None:
+        return None
+
+    feature_names = _build_context_feature_names(records_by_key, hard_case_by_qid, train_qids)
+    grouped = defaultdict(list)
+    targets = defaultdict(list)
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            x = _context_features(feature_names, hard_case, retriever)
+            for strategy, record in records_by_key[(qid, retriever)].items():
+                grouped[(retriever, strategy)].append(x)
+                targets[(retriever, strategy)].append(target_fn(record))
+
+    models = {}
+    for key, rows in grouped.items():
+        x_matrix = np.asarray(rows, dtype=float)
+        y_vector = np.asarray(targets[key], dtype=float)
+        regularizer = l2 * np.eye(x_matrix.shape[1], dtype=float)
+        regularizer[0, 0] = 0.0
+        a_matrix = x_matrix.T @ x_matrix + regularizer
+        try:
+            a_inv = np.linalg.inv(a_matrix)
+        except np.linalg.LinAlgError:
+            a_inv = np.linalg.pinv(a_matrix)
+        theta = a_inv @ x_matrix.T @ y_vector
+        models[key] = {"theta": theta, "a_inv": a_inv, "n": len(rows)}
+
+    return (feature_names, models) if models else None
+
+
+def _tune_linucb_thresholds(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+    feature_names: list[str],
+    models: dict[tuple[str, str], dict[str, object]],
+    alpha: float,
+    target_fn: Callable[[dict], float],
+) -> dict[str, float]:
+    thresholds = {}
+    grid = [step / 100.0 for step in range(-10, 41)]
+    retrievers = sorted({retriever for _, retriever in records_by_key})
+    for retriever in retrievers:
+        best_threshold = 0.0
+        best_score = None
+        for threshold in grid:
+            selected = []
+            for qid in train_qids:
+                if (qid, retriever) not in records_by_key:
+                    continue
+                hard_case = hard_case_by_qid.get(qid, {})
+                candidates = records_by_key[(qid, retriever)]
+                strategy = _select_conservative_linucb_action(
+                    candidates,
+                    hard_case,
+                    retriever,
+                    feature_names,
+                    models,
+                    threshold,
+                    alpha=alpha,
+                )
+                selected.append(target_fn(candidates[strategy]))
+            score = _mean(selected)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_threshold = threshold
+        thresholds[retriever] = best_threshold
+    return thresholds
+
+
+def _select_conservative_linucb_action(
+    candidates: dict[str, dict],
+    hard_case: dict,
+    retriever: str,
+    feature_names: list[str],
+    models: dict[tuple[str, str], dict[str, object]],
+    threshold: float,
+    alpha: float,
+) -> str:
+    available = [strategy for strategy in STRATEGIES if strategy in candidates]
+    original = "original" if "original" in candidates else available[0]
+    x = np.asarray(_context_features(feature_names, hard_case, retriever), dtype=float)
+
+    original_score = _linucb_score(models, retriever, original, x, alpha=0.0)
+    if original_score is None:
+        original_score = 0.0
+
+    best_strategy = original
+    best_score = original_score
+    for strategy in available:
+        score = _linucb_score(models, retriever, strategy, x, alpha=alpha if strategy != original else 0.0)
+        if score is None:
+            continue
+        if score > best_score:
+            best_score = score
+            best_strategy = strategy
+
+    if best_strategy != original and best_score - original_score < threshold:
+        return original
+    return best_strategy
+
+
+def _linucb_score(
+    models: dict[tuple[str, str], dict[str, object]],
+    retriever: str,
+    strategy: str,
+    x,
+    alpha: float,
+) -> float | None:
+    model = models.get((retriever, strategy))
+    if model is None:
+        return None
+    theta = model["theta"]
+    a_inv = model["a_inv"]
+    prediction = float(np.dot(theta, x))
+    uncertainty = float(np.sqrt(max(0.0, x @ a_inv @ x)))
+    return prediction - alpha * uncertainty
+
+
+def _fit_refined_label_action_tables(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+) -> tuple[dict, dict]:
+    values = defaultdict(lambda: defaultdict(float))
+    counts = defaultdict(lambda: defaultdict(int))
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            contexts = _refined_label_contexts(hard_case, retriever, candidates)
+            for context in contexts:
+                for strategy, record in candidates.items():
+                    counts[context][strategy] += 1
+                    step = counts[context][strategy]
+                    reward = _recovery_utility(record)
+                    values[context][strategy] += (reward - values[context][strategy]) / step
+    return values, counts
+
+
+def _fit_retriever_tuned_action_tables(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+) -> tuple[dict, dict]:
+    configs = {
+        "bm25": (_state_recovery_contexts, lambda record: float(record.get("mrr_improvement", 0.0))),
+        "dense": (_label_policy_contexts, _policy_reward),
+        "hybrid": (_label_state_recovery_contexts, _recovery_utility),
+    }
+    values = defaultdict(lambda: defaultdict(float))
+    counts = defaultdict(lambda: defaultdict(int))
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            context_fn, target_fn = configs.get(retriever, (_state_recovery_contexts, _recovery_utility))
+            candidates = records_by_key[(qid, retriever)]
+            for context in context_fn(hard_case, retriever):
+                for strategy, record in candidates.items():
+                    counts[context][strategy] += 1
+                    step = counts[context][strategy]
+                    reward = target_fn(record)
+                    values[context][strategy] += (reward - values[context][strategy]) / step
+    return values, counts
+
+
+def _select_refined_label_rule_model_action(
+    candidates: dict[str, dict],
+    hard_case: dict,
+    retriever: str,
+    label_values: dict,
+    label_counts: dict,
+    base_values: dict,
+    base_counts: dict,
+    threshold: float = 0.02,
+) -> str:
+    available = [strategy for strategy in STRATEGIES if strategy in candidates]
+    base_strategy = _select_from_context_tables(
+        available,
+        _retriever_tuned_contexts(hard_case, retriever),
+        base_values,
+        base_counts,
+    )
+    table_strategy, table_score, base_score = _refined_label_rank_rule(
+        available,
+        candidates,
+        hard_case,
+        retriever,
+        base_strategy,
+        label_values,
+        label_counts,
+    )
+    if table_strategy != base_strategy and table_score - base_score > threshold:
+        return table_strategy
+    return base_strategy
+
+
+def _refined_label_rank_rule(
+    available: list[str],
+    candidates: dict[str, dict],
+    hard_case: dict,
+    retriever: str,
+    base_strategy: str,
+    label_values: dict,
+    label_counts: dict,
+) -> tuple[str, float, float]:
+    label_group = str(hard_case.get("label_rule_group") or _label_rule_group(hard_case))
+    rank_bucket = _rank_bucket(_candidate_original_rank(candidates))
+    context = ("label_group_rank", retriever, label_group, rank_bucket)
+    for min_count in (8, 5, 3, 1):
+        scored = [
+            (label_values[context][strategy], strategy)
+            for strategy in available
+            if label_counts[context][strategy] >= min_count
+        ]
+        if scored:
+            best_score, best_strategy = max(
+                scored,
+                key=lambda item: (item[0], _strategy_tiebreak(item[1])),
+            )
+            base_score = label_values[context][base_strategy] if label_counts[context][base_strategy] else 0.0
+            return best_strategy, best_score, base_score
+    return base_strategy, 0.0, 0.0
+
+
+def _candidate_original_rank(candidates: dict[str, dict]) -> int | None:
+    original = candidates.get("original")
+    if not original:
+        return None
+    rank = original.get("original_gold_rank")
+    if rank in (None, ""):
+        return None
+    try:
+        return int(rank)
+    except (TypeError, ValueError):
+        return None
+
+
 def _predict_ranker_score(
     feature_names: list[str],
     weights,
@@ -784,6 +1319,59 @@ def _label_policy_contexts(hard_case: dict, retriever: str) -> list[tuple[str, .
     return contexts
 
 
+def _state_recovery_contexts(hard_case: dict, retriever: str) -> list[tuple[str, ...]]:
+    return [
+        ("state", retriever, _state_key(hard_case, retriever)),
+        ("retriever", retriever),
+        ("global",),
+    ]
+
+
+def _label_state_recovery_contexts(hard_case: dict, retriever: str) -> list[tuple[str, ...]]:
+    failure_label = str(hard_case.get("failure_label") or "").strip()
+    return [
+        ("label_state", retriever, failure_label, _state_key(hard_case, retriever)),
+        ("state", retriever, _state_key(hard_case, retriever)),
+        ("label", retriever, failure_label),
+        ("retriever", retriever),
+        ("global",),
+    ]
+
+
+def _retriever_tuned_contexts(hard_case: dict, retriever: str) -> list[tuple[str, ...]]:
+    if retriever == "dense":
+        return _label_policy_contexts(hard_case, retriever)
+    if retriever == "hybrid":
+        return _label_state_recovery_contexts(hard_case, retriever)
+    return _state_recovery_contexts(hard_case, retriever)
+
+
+def _refined_label_contexts(
+    hard_case: dict,
+    retriever: str,
+    candidates: dict[str, dict] | None = None,
+) -> list[tuple[str, ...]]:
+    refined_label = str(hard_case.get("refined_failure_label") or _refined_failure_label(hard_case))
+    label_group = str(hard_case.get("label_rule_group") or _label_rule_group(hard_case))
+    failure_label = str(hard_case.get("failure_label") or "unlabeled")
+    question_type = str(hard_case.get("question_type") or "unknown")
+    rank = _candidate_original_rank(candidates) if candidates else _original_rank(hard_case, retriever)
+    rank_bucket = _rank_bucket(rank)
+    failed_scope = _failed_scope(hard_case)
+    return [
+        ("refined_label_rank_scope", retriever, refined_label, rank_bucket, failed_scope),
+        ("refined_label_rank", retriever, refined_label, rank_bucket),
+        ("refined_label", retriever, refined_label),
+        ("label_group_rank", retriever, label_group, rank_bucket),
+        ("label_group", retriever, label_group),
+        ("failure_label", retriever, failure_label),
+        ("question_type", retriever, question_type),
+        ("retriever_rank", retriever, rank_bucket),
+        ("retriever", retriever),
+        ("global",),
+    ]
+
+
 def _select_from_context_tables(
     available: list[str],
     contexts: list[tuple[str, ...]],
@@ -803,7 +1391,6 @@ def _strategy_tiebreak(strategy: str) -> int:
         "keyword": 3,
         "structured": 2,
         "expanded": 1,
-        "prompt": 0,
     }
     return preference.get(strategy, -1)
 
@@ -830,6 +1417,12 @@ def _build_reward_ranker_feature_names(
         "rewrite_len_delta",
         "keyword_overlap",
         "semantic_similarity",
+        "top1_score",
+        "score_gap_top1_top2",
+        "score_ratio_top1_top2",
+        "original_top1_score",
+        "original_score_gap_top1_top2",
+        "original_score_ratio_top1_top2",
     }
     for qid in train_qids:
         hard_case = hard_case_by_qid.get(qid, {})
@@ -872,6 +1465,12 @@ def _reward_ranker_features(
     values["rewrite_len_delta"] = max(min(rewrite_len - original_len, 30.0), -30.0) / 30.0
     values["keyword_overlap"] = _safe_float(record.get("keyword_overlap"))
     values["semantic_similarity"] = _safe_float(record.get("semantic_similarity"))
+    values["original_top1_score"] = _scaled_score(record.get("original_top1_score"))
+    values["original_score_gap_top1_top2"] = _scaled_score(record.get("original_score_gap_top1_top2"))
+    values["original_score_ratio_top1_top2"] = min(_safe_float(record.get("original_score_ratio_top1_top2")), 10.0) / 10.0
+    values["top1_score"] = _scaled_score(record.get("top1_score"))
+    values["score_gap_top1_top2"] = _scaled_score(record.get("score_gap_top1_top2"))
+    values["score_ratio_top1_top2"] = min(_safe_float(record.get("score_ratio_top1_top2")), 10.0) / 10.0
 
     for name in _categorical_feature_names(hard_case, retriever, strategy, record):
         values[name] = 1.0
@@ -879,9 +1478,200 @@ def _reward_ranker_features(
     return [values[name] for name in feature_names]
 
 
+def _build_context_feature_names(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+) -> list[str]:
+    names = {
+        "bias",
+        "original_success",
+        "original_rank_missing",
+        "original_rank_inverse",
+        "original_rank_gt_5",
+        "originally_failed",
+        "failed_retriever_count",
+        "question_len",
+        "question_len_short",
+        "question_len_long",
+        "has_digit",
+        "has_latin",
+        "has_long_token",
+        "bm25_initial_rank_missing",
+        "dense_initial_rank_missing",
+        "hybrid_initial_rank_missing",
+        "bm25_initial_rank_inverse",
+        "dense_initial_rank_inverse",
+        "hybrid_initial_rank_inverse",
+        "rank_gap_bm25_dense",
+        "rank_gap_bm25_hybrid",
+        "rank_gap_dense_hybrid",
+        "bm25_dense_overlap",
+        "bm25_hybrid_overlap",
+        "dense_hybrid_overlap",
+        "retriever_consensus_overlap",
+        "original_top1_score",
+        "original_score_gap_top1_top2",
+        "original_score_ratio_top1_top2",
+    }
+    for qid in train_qids:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            names.update(_context_categorical_feature_names(hard_case, retriever))
+    return ["bias", *sorted(name for name in names if name != "bias")]
+
+
+def _context_features(feature_names: list[str], hard_case: dict, retriever: str) -> list[float]:
+    values = defaultdict(float)
+    values["bias"] = 1.0
+
+    original_rank = _original_rank(hard_case, retriever)
+    values["original_success"] = 1.0 if original_rank else 0.0
+    values["original_rank_missing"] = 1.0 if original_rank is None else 0.0
+    values["original_rank_inverse"] = 0.0 if original_rank is None else 1.0 / original_rank
+    values["original_rank_gt_5"] = 1.0 if original_rank is not None and original_rank > 5 else 0.0
+    values["originally_failed"] = 1.0 if retriever in _failed_retrievers(hard_case) else 0.0
+    values["failed_retriever_count"] = float(len(_failed_retrievers(hard_case)))
+
+    question = str(hard_case.get("question") or "")
+    question_tokens = tokenize(question)
+    question_len = len(question_tokens)
+    values["question_len"] = min(question_len, 30) / 30.0
+    values["question_len_short"] = 1.0 if question_len <= 4 else 0.0
+    values["question_len_long"] = 1.0 if question_len > 10 else 0.0
+    values["has_digit"] = 1.0 if any(char.isdigit() for char in question) else 0.0
+    values["has_latin"] = 1.0 if any(char.isascii() and char.isalpha() for char in question) else 0.0
+    values["has_long_token"] = 1.0 if any(len(token) >= 7 for token in question_tokens) else 0.0
+
+    initial_ranks = _initial_rank_features(hard_case)
+    for name, rank in initial_ranks.items():
+        values[f"{name}_missing"] = 1.0 if rank is None else 0.0
+        values[f"{name}_inverse"] = 0.0 if rank is None else 1.0 / rank
+    values["rank_gap_bm25_dense"] = _rank_gap(initial_ranks["bm25_initial_rank"], initial_ranks["dense_initial_rank"])
+    values["rank_gap_bm25_hybrid"] = _rank_gap(initial_ranks["bm25_initial_rank"], initial_ranks["hybrid_initial_rank"])
+    values["rank_gap_dense_hybrid"] = _rank_gap(initial_ranks["dense_initial_rank"], initial_ranks["hybrid_initial_rank"])
+    overlap_features = _retriever_overlap_features(hard_case)
+    values["bm25_dense_overlap"] = overlap_features["bm25_dense_overlap"]
+    values["bm25_hybrid_overlap"] = overlap_features["bm25_hybrid_overlap"]
+    values["dense_hybrid_overlap"] = overlap_features["dense_hybrid_overlap"]
+    values["retriever_consensus_overlap"] = overlap_features["retriever_consensus_overlap"]
+    values["original_top1_score"] = _scaled_score(
+        hard_case.get("original_top1_score_by_retriever", {}).get(retriever)
+    )
+    values["original_score_gap_top1_top2"] = _scaled_score(
+        hard_case.get("original_score_gap_by_retriever", {}).get(retriever)
+    )
+    values["original_score_ratio_top1_top2"] = min(
+        _safe_float(hard_case.get("original_score_ratio_by_retriever", {}).get(retriever)),
+        10.0,
+    ) / 10.0
+
+    for name in _context_categorical_feature_names(hard_case, retriever):
+        values[name] = 1.0
+
+    return [values[name] for name in feature_names]
+
+
+def _initial_rank_features(hard_case: dict) -> dict[str, int | None]:
+    return {
+        "bm25_initial_rank": _original_rank(hard_case, "bm25"),
+        "dense_initial_rank": _original_rank(hard_case, "dense"),
+        "hybrid_initial_rank": _original_rank(hard_case, "hybrid"),
+    }
+
+
+def _rank_gap(left: int | None, right: int | None) -> float:
+    left_value = 11 if left is None else left
+    right_value = 11 if right is None else right
+    return max(min(float(left_value - right_value), 10.0), -10.0) / 10.0
+
+
+def _scaled_score(value) -> float:
+    score = _safe_float(value)
+    if score <= 0.0:
+        return 0.0
+    return min(score, 100.0) / 100.0
+
+
+def _retriever_overlap_features(hard_case: dict) -> dict[str, float]:
+    retrieved = (
+        hard_case.get("original_scored_top10_by_retriever")
+        or hard_case.get("original_context_by_retriever")
+        or hard_case.get("original_retrieved_by_retriever", {})
+    )
+    bm25 = set(retrieved.get("bm25", []))
+    dense = set(retrieved.get("dense", []))
+    hybrid = set(retrieved.get("hybrid", []))
+    bm25_dense = _topk_overlap(bm25, dense)
+    bm25_hybrid = _topk_overlap(bm25, hybrid)
+    dense_hybrid = _topk_overlap(dense, hybrid)
+    present = [items for items in (bm25, dense, hybrid) if items]
+    if len(present) < 2:
+        consensus = 0.0
+    else:
+        consensus = (bm25_dense + bm25_hybrid + dense_hybrid) / 3.0
+    return {
+        "bm25_dense_overlap": bm25_dense,
+        "bm25_hybrid_overlap": bm25_hybrid,
+        "dense_hybrid_overlap": dense_hybrid,
+        "retriever_consensus_overlap": consensus,
+    }
+
+
+def _topk_overlap(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / min(len(left), len(right))
+
+
+def _context_categorical_feature_names(hard_case: dict, retriever: str) -> set[str]:
+    failure_type = str(hard_case.get("failure_type", "unlabeled") or "unlabeled")
+    failure_label = str(hard_case.get("failure_label", "") or "unlabeled")
+    refined_label = str(hard_case.get("refined_failure_label", "") or _refined_failure_label(hard_case))
+    label_group = str(hard_case.get("label_rule_group", "") or _label_rule_group(hard_case))
+    secondary_label = str(hard_case.get("secondary_failure_label", "") or "none")
+    question_type = str(hard_case.get("question_type", "") or "unknown")
+    rank_bucket = _rank_bucket(_original_rank(hard_case, retriever))
+    failed_scope = "failed_" + "_".join(sorted(_failed_retrievers(hard_case))) if _failed_retrievers(hard_case) else "no_failure"
+    overlap = _retriever_overlap_features(hard_case)
+    bm25_dense_overlap_bucket = _overlap_bucket(overlap["bm25_dense_overlap"])
+    consensus_overlap_bucket = _overlap_bucket(overlap["retriever_consensus_overlap"])
+    return {
+        f"retriever={retriever}",
+        f"failure_type={failure_type}",
+        f"failure_label={failure_label}",
+        f"refined_failure_label={refined_label}",
+        f"label_rule_group={label_group}",
+        f"secondary_failure_label={secondary_label}",
+        f"question_type={question_type}",
+        f"rank_bucket={rank_bucket}",
+        f"failed_scope={failed_scope}",
+        f"retriever_label={retriever}:{failure_label}",
+        f"retriever_refined_label={retriever}:{refined_label}",
+        f"retriever_label_group={retriever}:{label_group}",
+        f"retriever_type={retriever}:{failure_type}",
+        f"retriever_rank={retriever}:{rank_bucket}",
+        f"bm25_dense_overlap={bm25_dense_overlap_bucket}",
+        f"consensus_overlap={consensus_overlap_bucket}",
+        f"retriever_consensus_overlap={retriever}:{consensus_overlap_bucket}",
+    }
+
+
+def _overlap_bucket(value: float) -> str:
+    if value <= 0.0:
+        return "none"
+    if value < 0.2:
+        return "low"
+    if value < 0.5:
+        return "medium"
+    return "high"
+
+
 def _categorical_feature_names(hard_case: dict, retriever: str, strategy: str, record: dict) -> set[str]:
     failure_type = str(hard_case.get("failure_type", record.get("failure_type", "unlabeled")) or "unlabeled")
     failure_label = str(hard_case.get("failure_label", record.get("failure_label", "")) or "unlabeled")
+    refined_label = str(hard_case.get("refined_failure_label", "") or _refined_failure_label(hard_case))
+    label_group = str(hard_case.get("label_rule_group", "") or _label_rule_group(hard_case))
     secondary_label = str(hard_case.get("secondary_failure_label", record.get("secondary_failure_label", "")) or "none")
     question_type = str(hard_case.get("question_type", record.get("question_type", "")) or "unknown")
     rank_bucket = _rank_bucket(_original_rank(hard_case, retriever))
@@ -890,13 +1680,21 @@ def _categorical_feature_names(hard_case: dict, retriever: str, strategy: str, r
         f"strategy={strategy}",
         f"failure_type={failure_type}",
         f"failure_label={failure_label}",
+        f"refined_failure_label={refined_label}",
+        f"label_rule_group={label_group}",
         f"secondary_failure_label={secondary_label}",
         f"question_type={question_type}",
         f"rank_bucket={rank_bucket}",
         f"retriever_strategy={retriever}:{strategy}",
         f"retriever_label={retriever}:{failure_label}",
+        f"retriever_refined_label={retriever}:{refined_label}",
+        f"retriever_label_group={retriever}:{label_group}",
         f"label_strategy={failure_label}:{strategy}",
+        f"refined_label_strategy={refined_label}:{strategy}",
+        f"label_group_strategy={label_group}:{strategy}",
         f"retriever_label_strategy={retriever}:{failure_label}:{strategy}",
+        f"retriever_refined_label_strategy={retriever}:{refined_label}:{strategy}",
+        f"retriever_label_group_strategy={retriever}:{label_group}:{strategy}",
         f"retriever_rank_strategy={retriever}:{rank_bucket}:{strategy}",
     }
 
@@ -916,6 +1714,60 @@ def _safe_float(value) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _refined_failure_label(hard_case: dict) -> str:
+    label = str(hard_case.get("failure_label") or hard_case.get("failure_type") or "unlabeled")
+    question = str(hard_case.get("question") or "")
+    question_type = str(hard_case.get("question_type") or "")
+    secondary = str(hard_case.get("secondary_failure_label") or "")
+    failed_count = len(_failed_retrievers(hard_case))
+
+    numeric_intent = _has_numeric_intent(question, question_type)
+    if numeric_intent and label in {"lexical_mismatch", "missing_key_term", "entity_mismatch", "semantic_mismatch"}:
+        label = "numeric_temporal_mismatch"
+    elif label == "semantic_mismatch":
+        label = "lexical_mismatch"
+    elif label == "ambiguous" and len(tokenize(question)) <= 4:
+        label = "missing_key_term"
+
+    suffixes = []
+    if secondary and secondary not in {"none", "unlabeled", label}:
+        suffixes.append(secondary)
+    elif _has_latin(question) and label in {"entity_mismatch", "lexical_mismatch"}:
+        suffixes.append("latin_surface")
+    elif failed_count >= 2 and label in {"missing_key_term", "context_boundary_issue"}:
+        suffixes.append("multi_retriever_failure")
+    elif len(tokenize(question)) <= 4 and label in {"missing_key_term", "ambiguous"}:
+        suffixes.append("short_query")
+
+    return "+".join([label, *suffixes[:1]]) if suffixes else label
+
+
+def _label_rule_group(hard_case: dict) -> str:
+    refined = _refined_failure_label(hard_case)
+    return refined.split("+", 1)[0]
+
+
+def _has_numeric_intent(question: str, question_type: str) -> bool:
+    return question_type in {"numeric", "when"} or bool(
+        re.search(r"\d|몇|언제|연도|년도|날짜|시기|몇 년|몇 월|몇 일|순위|몇 위", question)
+    )
+
+
+def _has_latin(question: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", question))
+
+
+def _failed_scope(hard_case: dict) -> str:
+    failed = _failed_retrievers(hard_case)
+    if not failed:
+        return "no_failure"
+    if len(failed) >= 3:
+        return "failed_all"
+    if len(failed) == 2:
+        return "failed_pair"
+    return f"failed_{failed[0]}"
 
 
 def _fit_strategy_values(
@@ -983,6 +1835,7 @@ def _policy_row(
     record = candidates[strategy]
     original_rank = _original_rank(hard_case, retriever)
     state_key = state_key or _state_key(hard_case, retriever)
+    overlap_features = _retriever_overlap_features(hard_case)
     return {
         "qid": record["qid"],
         "retriever": retriever,
@@ -992,6 +1845,8 @@ def _policy_row(
         "selected_strategy": strategy,
         "failure_type": hard_case.get("failure_type", record.get("failure_type", "unlabeled")),
         "failure_label": hard_case.get("failure_label", record.get("failure_label", "")),
+        "refined_failure_label": hard_case.get("refined_failure_label", ""),
+        "label_rule_group": hard_case.get("label_rule_group", ""),
         "secondary_failure_label": hard_case.get(
             "secondary_failure_label",
             record.get("secondary_failure_label", ""),
@@ -1027,6 +1882,18 @@ def _policy_row(
         "rank_gap_bm25_dense": record.get("rank_gap_bm25_dense", ""),
         "rank_gap_bm25_hybrid": record.get("rank_gap_bm25_hybrid", ""),
         "rank_gap_dense_hybrid": record.get("rank_gap_dense_hybrid", ""),
+        "bm25_dense_overlap": overlap_features["bm25_dense_overlap"],
+        "bm25_hybrid_overlap": overlap_features["bm25_hybrid_overlap"],
+        "dense_hybrid_overlap": overlap_features["dense_hybrid_overlap"],
+        "retriever_consensus_overlap": overlap_features["retriever_consensus_overlap"],
+        "top1_score": record.get("top1_score", ""),
+        "top2_score": record.get("top2_score", ""),
+        "score_gap_top1_top2": record.get("score_gap_top1_top2", ""),
+        "score_ratio_top1_top2": record.get("score_ratio_top1_top2", ""),
+        "original_top1_score": record.get("original_top1_score", ""),
+        "original_top2_score": record.get("original_top2_score", ""),
+        "original_score_gap_top1_top2": record.get("original_score_gap_top1_top2", ""),
+        "original_score_ratio_top1_top2": record.get("original_score_ratio_top1_top2", ""),
     }
 
 

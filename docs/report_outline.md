@@ -10,7 +10,7 @@ Describe Korean RAG hard retrieval cases, the one-step offline RL formulation, t
 
 ## 1. Dataset Preparation
 
-- Dataset: KorQuAD dev by default; KLUE-MRC is planned for external validation.
+- Dataset: KorQuAD 1.0, KLUE-MRC, and filtered KorQuAD 2.0.
 - Build passages, questions, answer spans, and gold passage ids.
 - Run original-query retrieval and collect hard cases where the gold passage is absent from top-10.
 
@@ -40,7 +40,6 @@ Describe Korean RAG hard retrieval cases, the one-step offline RL formulation, t
 - `original`: no rewrite
 - `keyword`: core keyword extraction
 - `expanded`: keyword plus synonym/domain expansion
-- `prompt`: search-intent style rewrite
 - `structured`: field-like query with question and target information
 - `llm`: external LLM-generated rewrite, with deterministic fallback for reproducible runs
 
@@ -48,7 +47,7 @@ Describe Korean RAG hard retrieval cases, the one-step offline RL formulation, t
 
 - For every hard case, evaluate every rewrite action with every retriever.
 - Store `(state, action, retriever, metrics, reward)` in `rewrite_results.jsonl`.
-- Current real-dense run: 265 union hard cases and 4,770 reward-table rows.
+- Current real-dense run: 1,000 hard cases and 15,000 reward-table rows.
 - Reward:
 
 ```text
@@ -84,7 +83,6 @@ Policies currently compared:
 - `original_only`
 - `always_keyword`
 - `always_expanded`
-- `always_prompt`
 - `always_structured`
 - `always_llm`
 - `random_policy`
@@ -93,6 +91,10 @@ Policies currently compared:
 - `ucb_bandit`
 - `thompson_sampling`
 - `contextual_bandit`
+- `state_recovery_bandit_policy`
+- `retriever_tuned_bandit_policy`
+- `conservative_linucb_policy`
+- `refined_label_rule_model_policy`
 - `offline_q_learning`
 - `oracle_best_strategy`
 
@@ -121,6 +123,11 @@ Report:
 - Reward ablation
 - Hybrid alpha sweep
 - Oracle gap analysis
+- Multi-seed policy stability
+- Rewrite harm and recovery analysis
+- Policy action distribution by failure label
+- LLM rewrite/cache audit
+- Encoding diagnostics
 - Qualitative examples from `reports/qualitative_examples.csv`
 - Failure-type manual-check summary from `reports/failure_type_manual_check.csv`
 

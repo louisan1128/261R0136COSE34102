@@ -193,7 +193,7 @@ def main() -> None:
 
     csv_rows = _make_csv_rows(output_records)
     validation = _validate_outputs(records, output_records, csv_rows)
-    summary = _build_summary(output_records, validation, output_jsonl, output_csv)
+    summary = _build_summary(output_records, validation, output_jsonl, output_csv, llm_api_calls, llm_fallback_count)
 
     _write_jsonl(output_records, output_jsonl, overwrite=args.overwrite)
     _write_csv(csv_rows, output_csv, overwrite=args.overwrite)
@@ -506,6 +506,8 @@ def _build_summary(
     validation: dict[str, int],
     output_jsonl: Path,
     output_csv: Path,
+    llm_api_calls: int = 0,
+    llm_fallback_count: int = 0,
 ) -> dict[str, Any]:
     candidates = [candidate for record in output_records for candidate in record["rewrite_candidates"]]
     summary = {
@@ -517,6 +519,8 @@ def _build_summary(
         "empty_query_count": validation["empty_query_count"],
         "invalid_candidate_count": validation["invalid_candidate_count"],
         "answer_leakage_count": validation["answer_leakage_count"],
+        "llm_api_calls": llm_api_calls,
+        "llm_fallback_count": llm_fallback_count,
         "output_jsonl": str(output_jsonl),
         "output_csv": str(output_csv),
     }

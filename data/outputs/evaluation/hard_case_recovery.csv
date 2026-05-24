@@ -1,10 +1,10 @@
 case_subset,recovered_at_10,recovery@10,retriever,total_cases
 union_hard_cases,267,0.267,bm25,1000
-union_hard_cases,92,0.092,dense,1000
-union_hard_cases,167,0.167,hybrid,1000
+union_hard_cases,319,0.319,dense,1000
+union_hard_cases,325,0.325,hybrid,1000
 retriever_originally_failed,0,0.0,bm25,0
 retriever_originally_failed,0,0.0,dense,0
-retriever_originally_failed,167,0.167,hybrid,1000
+retriever_originally_failed,325,0.325,hybrid,1000
 all_retrievers_originally_failed,0,0.0,bm25,0
 all_retrievers_originally_failed,0,0.0,dense,0
 all_retrievers_originally_failed,0,0.0,hybrid,0

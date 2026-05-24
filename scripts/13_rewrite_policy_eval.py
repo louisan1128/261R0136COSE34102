@@ -16,10 +16,12 @@ def main():
     rl_config = config.get("offline_rl", {})
     rewrite_results = read_jsonl(data_config["rewrite_results_path"])
     hard_cases = read_jsonl(data_config["hard_cases_path"])
+    original_contexts = _load_original_retrieval_contexts(Path("data/outputs/original_retrieval"))
 
     policy_rows, summary_rows = evaluate_rewrite_policies(
         rewrite_results,
         hard_cases,
+        original_contexts=original_contexts,
         seed=rl_config.get("seed", 7),
         train_ratio=rl_config.get("train_ratio", 0.7),
         gamma=rl_config.get("gamma", 0.0),
@@ -46,6 +48,8 @@ def main():
             "selected_strategy",
             "failure_type",
             "failure_label",
+            "refined_failure_label",
+            "label_rule_group",
             "secondary_failure_label",
             "original_rank",
             "original_success",
@@ -78,6 +82,18 @@ def main():
             "rank_gap_bm25_dense",
             "rank_gap_bm25_hybrid",
             "rank_gap_dense_hybrid",
+            "bm25_dense_overlap",
+            "bm25_hybrid_overlap",
+            "dense_hybrid_overlap",
+            "retriever_consensus_overlap",
+            "top1_score",
+            "top2_score",
+            "score_gap_top1_top2",
+            "score_ratio_top1_top2",
+            "original_top1_score",
+            "original_top2_score",
+            "original_score_gap_top1_top2",
+            "original_score_ratio_top1_top2",
         ],
     )
     write_csv(summary_rows, policy_summary_path)
@@ -113,6 +129,19 @@ def main():
     print(f"Saved policy summary to {policy_summary_path}")
     print(f"Saved hard-case policy summary to {policy_hard_case_summary_path}")
     print(f"Saved final comparison to {final_comparison_path}")
+
+
+def _load_original_retrieval_contexts(input_dir: Path) -> dict[str, dict[str, list[str]]]:
+    contexts: dict[str, dict[str, list[str]]] = {}
+    for path in sorted(input_dir.glob("*_results.jsonl")):
+        rows = read_jsonl(path)
+        for row in rows:
+            qid = str(row.get("qid", ""))
+            retriever = str(row.get("retriever", ""))
+            top10 = [str(doc_id) for doc_id in row.get("top10_doc_ids", [])]
+            if qid and retriever and top10:
+                contexts.setdefault(qid, {})[retriever] = top10
+    return contexts
 
 
 if __name__ == "__main__":
