@@ -1,6 +1,6 @@
 top_k: 10
-project_name: KorQR-RL
-project_title: "Offline Reinforcement Learning for Korean Query Rewriting in RAG"
+project_name: Ko-RL_QR
+project_title: "Retriever-Aware Selective Query Rewriting for Korean RAG"
 
 # Use "sentence_transformers" for final experiments.
 # Use "lexical" only for fast offline smoke tests.

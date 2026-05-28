@@ -4,13 +4,33 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
 
 # virtual env
 NLP/
 venv/
+.venv/
 .env
+.env.*
 
-# raw data
+# raw/local data
 data/raw/
+data/processed/
+data/outputs/cache/
 
+# local retrieval artifacts
 embeddings/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc

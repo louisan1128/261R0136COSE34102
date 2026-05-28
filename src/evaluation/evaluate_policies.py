@@ -26,6 +26,7 @@ FINAL_POLICY_LABELS = {
     "state_recovery_bandit_policy": "state_recovery_contextual_bandit",
     "retriever_tuned_bandit_policy": "retriever_tuned_contextual_bandit",
     "conservative_linucb_policy": "conservative_contextual_bandit",
+    "observable_only_selector": "observable_only_selector",
     "refined_label_rule_model_policy": "refined_label_rule_model_policy",
     "reward_selected": "reward_selected_rewrite",
     "offline_q_learning": "q_table_rewrite",
@@ -64,6 +65,7 @@ def evaluate_rewrite_policies(
     policy_rows.extend(_evaluate_state_recovery_bandit_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(_evaluate_retriever_tuned_bandit_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(_evaluate_conservative_linucb_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
+    policy_rows.extend(_evaluate_observable_only_selector(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(_evaluate_refined_label_rule_model_policy(records_by_key, hard_case_by_qid, qid_order, train_qids, test_qids))
     policy_rows.extend(
         _evaluate_offline_q_learning(
@@ -775,6 +777,41 @@ def _evaluate_conservative_linucb_policy(
     return rows
 
 
+def _evaluate_observable_only_selector(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    qid_order: list[str],
+    train_qids: set[str],
+    test_qids: set[str],
+) -> list[dict]:
+    """Select rewrites using only inference-time observable signals.
+
+    The training target may use logged rewards, but test-time features exclude
+    manual labels, gold ranks, gold-passage success flags, and action outcomes.
+    """
+
+    rules = _fit_observable_only_rules(records_by_key, hard_case_by_qid, train_qids)
+
+    rows = []
+    for qid in qid_order:
+        hard_case = hard_case_by_qid.get(qid, {})
+        for retriever in _retrievers_for_qid(records_by_key, qid):
+            candidates = records_by_key[(qid, retriever)]
+            strategy = _select_observable_only_rule_action(candidates, hard_case, retriever, rules)
+            rows.append(
+                _policy_row(
+                    "observable_only_selector",
+                    strategy,
+                    candidates,
+                    hard_case,
+                    retriever,
+                    eval_split=_eval_split(qid, train_qids, test_qids),
+                    state_key="observable_only",
+                )
+            )
+    return rows
+
+
 def _evaluate_refined_label_rule_model_policy(
     records_by_key: dict[tuple[str, str], dict[str, dict]],
     hard_case_by_qid: dict[str, dict],
@@ -1082,6 +1119,146 @@ def _linucb_score(
     prediction = float(np.dot(theta, x))
     uncertainty = float(np.sqrt(max(0.0, x @ a_inv @ x)))
     return prediction - alpha * uncertainty
+
+
+def _fit_observable_only_rules(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+) -> dict[str, tuple[str, str, str, float, str]]:
+    rules = {}
+    retrievers = sorted({retriever for _, retriever in records_by_key})
+    for retriever in retrievers:
+        best_rule = ("always", "original", "ge", 0.5, "original")
+        best_score = None
+        for feature in _observable_rule_features():
+            thresholds = _observable_rule_thresholds(records_by_key, hard_case_by_qid, train_qids, retriever, feature)
+            for default_strategy in STRATEGIES:
+                for alternate_strategy in STRATEGIES:
+                    for op in ("lt", "ge"):
+                        for threshold in thresholds:
+                            selected_rewards = []
+                            for qid in train_qids:
+                                if (qid, retriever) not in records_by_key:
+                                    continue
+                                hard_case = hard_case_by_qid.get(qid, {})
+                                candidates = records_by_key[(qid, retriever)]
+                                strategy = _apply_observable_rule(
+                                    candidates,
+                                    hard_case,
+                                    retriever,
+                                    feature,
+                                    default_strategy,
+                                    alternate_strategy,
+                                    op,
+                                    threshold,
+                                )
+                                selected_rewards.append(_observable_rule_objective(candidates[strategy], retriever))
+                            score = _mean(selected_rewards)
+                            if best_score is None or score > best_score:
+                                best_score = score
+                                best_rule = (feature, default_strategy, op, threshold, alternate_strategy)
+        rules[retriever] = best_rule
+    return rules
+
+
+def _observable_rule_objective(record: dict, retriever: str) -> float:
+    if retriever == "dense":
+        return _policy_reward(record)
+    return float(record.get("recall@10", 0.0))
+
+
+def _select_observable_only_rule_action(
+    candidates: dict[str, dict],
+    hard_case: dict,
+    retriever: str,
+    rules: dict[str, tuple],
+) -> str:
+    rule = rules.get(retriever)
+    if not rule:
+        return "original" if "original" in candidates else next(iter(candidates))
+    feature, default_strategy, op, threshold, alternate_strategy = rule
+    return _apply_observable_rule(
+        candidates,
+        hard_case,
+        retriever,
+        feature,
+        default_strategy,
+        alternate_strategy,
+        op,
+        threshold,
+    )
+
+
+def _apply_observable_rule(
+    candidates: dict[str, dict],
+    hard_case: dict,
+    retriever: str,
+    feature: str,
+    default_strategy: str,
+    alternate_strategy: str,
+    op: str,
+    threshold: float,
+) -> str:
+    available = [strategy for strategy in STRATEGIES if strategy in candidates]
+    default_strategy = default_strategy if default_strategy in candidates else ("original" if "original" in candidates else available[0])
+    alternate_strategy = alternate_strategy if alternate_strategy in candidates else default_strategy
+    feature_value = _observable_rule_value(hard_case, retriever, feature)
+    use_alternate = feature_value < threshold if op == "lt" else feature_value >= threshold
+    return alternate_strategy if use_alternate else default_strategy
+
+
+def _observable_rule_features() -> list[str]:
+    return [
+        "always",
+        "query_len",
+        "has_digit",
+        "has_latin",
+        "original_top1_score",
+        "original_score_gap_top1_top2",
+        "original_score_ratio_top1_top2",
+    ]
+
+
+def _observable_rule_thresholds(
+    records_by_key: dict[tuple[str, str], dict[str, dict]],
+    hard_case_by_qid: dict[str, dict],
+    train_qids: set[str],
+    retriever: str,
+    feature: str,
+) -> list[float]:
+    if feature == "always":
+        return [0.5]
+    values = sorted(
+        {
+            _observable_rule_value(hard_case_by_qid.get(qid, {}), retriever, feature)
+            for qid in train_qids
+            if (qid, retriever) in records_by_key
+        }
+    )
+    if not values:
+        return [0.0]
+    step = max(1, len(values) // 40)
+    return values[::step] + [values[-1] + 1.0]
+
+
+def _observable_rule_value(hard_case: dict, retriever: str, feature: str) -> float:
+    question = str(hard_case.get("question") or "")
+    if feature == "always":
+        return 0.0
+    if feature == "query_len":
+        return float(len(tokenize(question)))
+    if feature == "has_digit":
+        return 1.0 if any(char.isdigit() for char in question) else 0.0
+    if feature == "has_latin":
+        return 1.0 if any(char.isascii() and char.isalpha() for char in question) else 0.0
+    if feature == "original_top1_score":
+        return _safe_float(hard_case.get("original_top1_score_by_retriever", {}).get(retriever))
+    if feature == "original_score_gap_top1_top2":
+        return _safe_float(hard_case.get("original_score_gap_by_retriever", {}).get(retriever))
+    if feature == "original_score_ratio_top1_top2":
+        return _safe_float(hard_case.get("original_score_ratio_by_retriever", {}).get(retriever))
+    return 0.0
 
 
 def _fit_refined_label_action_tables(
